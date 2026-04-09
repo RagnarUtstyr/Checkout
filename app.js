@@ -21,6 +21,7 @@ import {
   where,
   serverTimestamp,
   writeBatch,
+  limit,
 } from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js';
 
 const firebaseConfig = {
@@ -69,6 +70,20 @@ function slugify(value) {
 
 function displayName(name, unitNumber) {
   return unitNumber ? `${name} #${unitNumber}` : name;
+}
+
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} took too long. Please try again.`)), ms)),
+  ]);
+}
+
+async function getEquipmentByGroupKey(groupKey) {
+  const q = query(equipmentRef, where('groupKey', '==', groupKey));
+  const snapshot = await withTimeout(getDocs(q), 15000, 'Loading equipment group');
+  return snapshot.docs.map((snap) => ({ id: snap.id, ...snap.data() }));
 }
 
 function formatDate(value) {
@@ -196,7 +211,7 @@ function renderLogin() {
 }
 
 async function getAllEquipment() {
-  const snapshot = await getDocs(equipmentRef);
+  const snapshot = await withTimeout(getDocs(equipmentRef), 15000, 'Loading equipment');
   return snapshot.docs
     .map((snap) => ({ id: snap.id, ...snap.data() }))
     .map((item) => ({
@@ -243,14 +258,14 @@ async function getEquipmentGroups() {
 async function getRentalsByStatuses(statuses) {
   if (!statuses.length) return [];
   const q = query(rentalsRef, where('status', 'in', statuses));
-  const snapshot = await getDocs(q);
+  const snapshot = await withTimeout(getDocs(q), 15000, 'Loading rentals');
   return snapshot.docs
     .map((snap) => ({ id: snap.id, ...snap.data() }))
     .sort((a, b) => new Date(a.pickupDate || 0) - new Date(b.pickupDate || 0));
 }
 
 async function getRentalById(id) {
-  const snap = await getDoc(doc(db, 'rentals', id));
+  const snap = await withTimeout(getDoc(doc(db, 'rentals', id)), 15000, 'Loading booking');
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 }
 
@@ -259,7 +274,7 @@ async function createEquipmentGroup(payload) {
   const type = (payload.type || 'General').trim();
   const amount = Math.max(1, Number(payload.amount) || 1);
   const groupKey = `${slugify(type)}__${slugify(name)}`;
-  const existing = (await getAllEquipment()).filter((item) => item.groupKey === groupKey);
+  const existing = await getEquipmentByGroupKey(groupKey);
   let highest = existing.reduce((max, item) => Math.max(max, Number(item.unitNumber) || 0), 0);
   const batch = writeBatch(db);
 
@@ -276,13 +291,16 @@ async function createEquipmentGroup(payload) {
       model: payload.model?.trim() || '',
       description: payload.description?.trim() || '',
       notes: payload.notes?.trim() || '',
+      serialNumber: payload.serialNumber?.trim() || '',
+      location: payload.location?.trim() || '',
+      condition: payload.condition?.trim() || 'good',
       status: 'available',
       active: true,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
   }
-  await batch.commit();
+  await withTimeout(batch.commit(), 15000, 'Saving equipment');
 }
 
 function parseEquipmentXml(xmlText) {
@@ -319,9 +337,12 @@ function parseEquipmentXml(xmlText) {
 }
 
 async function importEquipmentRows(rows) {
-  const existing = await getAllEquipment();
+  const groupKeys = [...new Set(rows.map((row) => `${slugify((row.type || 'General').trim())}__${slugify(row.name.trim())}`))];
   const highestByGroup = new Map();
-  existing.forEach((item) => highestByGroup.set(item.groupKey, Math.max(highestByGroup.get(item.groupKey) || 0, item.unitNumber)));
+  for (const groupKey of groupKeys) {
+    const existing = await getEquipmentByGroupKey(groupKey);
+    highestByGroup.set(groupKey, existing.reduce((max, item) => Math.max(max, Number(item.unitNumber) || 0), 0));
+  }
   const batch = writeBatch(db);
   for (const row of rows) {
     const name = row.name.trim();
@@ -350,27 +371,27 @@ async function importEquipmentRows(rows) {
     }
     highestByGroup.set(groupKey, nextUnit);
   }
-  await batch.commit();
+  await withTimeout(batch.commit(), 20000, 'Importing XML');
 }
 
 async function deleteEquipmentItem(id) {
-  await deleteDoc(doc(db, 'equipment', id));
+  await withTimeout(deleteDoc(doc(db, 'equipment', id)), 15000, 'Removing equipment');
 }
 
 async function createRental(payload) {
-  await addDoc(rentalsRef, {
+  await withTimeout(addDoc(rentalsRef, {
     ...payload,
     status: 'booked',
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  });
+  }), 15000, 'Saving booking');
 }
 
 async function updateRental(rentalId, payload) {
-  await updateDoc(doc(db, 'rentals', rentalId), {
+  await withTimeout(updateDoc(doc(db, 'rentals', rentalId), {
     ...payload,
     updatedAt: serverTimestamp(),
-  });
+  }), 15000, 'Saving rental update');
   if (!payload.items?.length) return;
   const batch = writeBatch(db);
   for (const item of payload.items) {
@@ -380,7 +401,7 @@ async function updateRental(rentalId, payload) {
     if (payload.status === 'completed' || payload.status === 'partial_return') nextStatus = item.returned ? 'available' : 'checked_out';
     batch.update(doc(db, 'equipment', item.equipmentId), { status: nextStatus, updatedAt: serverTimestamp() });
   }
-  await batch.commit();
+  await withTimeout(batch.commit(), 15000, 'Saving equipment status');
 }
 
 async function renderDashboard() {
@@ -714,6 +735,8 @@ async function renderEquipment() {
           <div><label>Amount</label><input type="number" min="1" name="amount" value="1" required /></div>
           <div><label>Manufacturer</label><input name="manufacturer" /></div>
           <div><label>Model</label><input name="model" /></div>
+          <div><label>Storage location</label><input name="location" /></div>
+          <div><label>Condition</label><select name="condition"><option value="good">Good</option><option value="needs_service">Needs service</option><option value="damaged">Damaged</option></select></div>
           <div><label>Description</label><input name="description" /></div>
         </div>
         <div><label>Notes</label><textarea name="notes"></textarea></div>
@@ -746,7 +769,7 @@ function equipmentGroupMarkup(group) {
         <div class="row"><span class="badge">${group.amount} total</span><span class="badge">${group.availableCount} available</span></div>
       </div>
       ${group.description ? `<div class="muted small">${escapeHtml(group.description)}</div>` : ''}
-      <div class="equipment-items">${group.items.map((item) => `<div class="result-row"><div><strong>${escapeHtml(item.displayName)}</strong><div class="muted small">${escapeHtml(item.status)}</div></div><button class="danger" type="button" data-delete-equipment="${item.id}">Remove</button></div>`).join('')}</div>
+      <div class="equipment-items">${group.items.map((item) => `<div class="result-row"><div><strong>${escapeHtml(item.displayName)}</strong><div class="muted small">${escapeHtml([item.status, item.location].filter(Boolean).join(' • ') || 'available')}</div></div><button class="danger" type="button" data-delete-equipment="${item.id}">Remove</button></div>`).join('')}</div>
     </article>
   `;
 }
@@ -761,12 +784,18 @@ function setupEquipmentPage() {
 
   form.onsubmit = async (event) => {
     event.preventDefault();
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const originalLabel = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving…';
     const values = new FormData(form);
     try {
       await createEquipmentGroup(Object.fromEntries(values.entries()));
       setFlash({ notice: 'Equipment added successfully.' });
       render();
     } catch (error) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalLabel;
       setFlash({ error: error.message || 'Failed to add equipment.' });
       render();
     }
@@ -787,11 +816,16 @@ function setupEquipmentPage() {
   };
 
   importBtn.onclick = async () => {
+    const originalLabel = importBtn.textContent;
+    importBtn.disabled = true;
+    importBtn.textContent = 'Importing…';
     try {
       await importEquipmentRows(importRows);
       setFlash({ notice: 'XML import completed.' });
       render();
     } catch (error) {
+      importBtn.disabled = false;
+      importBtn.textContent = originalLabel;
       setFlash({ error: error.message || 'Failed to import XML.' });
       render();
     }
