@@ -1,122 +1,72 @@
-# Rental Equipment Tracker
+# Rental Equipment Tracker — GitHub Pages + Firebase
 
-A GitHub Pages hosted React app that uses Firebase Authentication and Cloud Firestore for bookings, checkouts, and check-ins.
+This version is a **no-build** app for GitHub Pages.
 
-## What this version does
+## What it uses
+- **GitHub Pages** for hosting static files
+- **Firebase Authentication** for login
+- **Cloud Firestore** for bookings, checkouts, check-ins, and equipment
+- **Firebase Web SDK via CDN browser modules**
 
-- GitHub hosts the frontend with **GitHub Pages**
-- The page reads and writes data directly to **Firebase**
-- Users sign in with **Google** or **email/password** using Firebase Authentication
-- No local install is required for deployment if you push through GitHub
+## Why this version exists
+This avoids Vite / React / GitHub Actions build issues.
+You can upload these files directly to GitHub and publish them with GitHub Pages.
 
-## Important setup you already have most of
+## How to publish
+1. Put these files in the root of your `Checkout` repo.
+2. In GitHub repo settings, open **Pages**.
+3. Set the source to **Deploy from a branch**.
+4. Choose branch `main` and folder `/ (root)`.
+5. Save.
 
-In Firebase, make sure all of these are enabled:
+Your site URL should be:
+`https://ragnarutstyr.github.io/Checkout/`
 
-- Authentication → **Google**
-- Authentication → **Email/Password**
-- Firestore database
+## Firebase checklist
+In Firebase Console:
+- Authentication → enable **Google**
+- Authentication → enable **Email/Password**
+- Authentication → Settings → **Authorized domains** → add `ragnarutstyr.github.io`
+- Firestore Database → create the database
+- Firestore Security Rules → update rules so signed-in users can read/write
 
-## One extra Firebase step for GitHub Pages login
+## Collections used
+### `equipment`
+Each document is one physical item/unit.
 
-Add your GitHub Pages domain to **Authentication → Settings → Authorized domains**.
-
-For a GitHub Pages site like:
-
-- `https://YOUR-USERNAME.github.io/YOUR-REPO/`
-
-add this domain:
-
-- `YOUR-USERNAME.github.io`
-
-That domain authorization matters for Firebase Auth on web apps.
-
-## How to publish from GitHub without installing anything locally
-
-1. Create a GitHub repository.
-2. Upload all project files to the repository.
-3. In GitHub, open **Settings → Pages**.
-4. Under **Build and deployment**, choose **GitHub Actions**.
-5. Push to the `main` branch.
-6. GitHub Actions will install dependencies, build the app, and publish it.
-
-The workflow file is already included here:
-
-- `.github/workflows/deploy.yml`
-
-## Routing for GitHub Pages
-
-This app uses `HashRouter`, so the URLs look like:
-
-- `/#/`
-- `/#/booking`
-- `/#/checkout`
-- `/#/checkin`
-
-That avoids refresh and deep-link issues on GitHub Pages.
-
-## Firebase config
-
-The app is preconfigured for:
-
-- Project ID: `checkout-52442`
-- Auth domain: `checkout-52442.firebaseapp.com`
-
-The Firebase web config is embedded in the client app as a fallback and can also be overridden with Vite env vars later if you want. For Firebase web apps, the API key is not treated as a secret in the same way as a server credential; your real protection is Firebase Auth plus Firestore Security Rules.
-
-## Suggested Firestore collections
-
-- `equipment` — equipment catalog
-- `rentals` — bookings/checkouts/check-ins
-
-## Suggested equipment document
-
+Example:
 ```json
 {
-  "name": "Sony A7 IV",
-  "category": "Camera",
-  "serialNumber": "A7IV-0021",
-  "barcode": "1000021",
-  "isActive": true,
-  "notes": "Main body only"
+  "name": "C-Stand",
+  "type": "Grip",
+  "unitNumber": 3,
+  "displayName": "C-Stand #3",
+  "groupKey": "grip__c-stand",
+  "manufacturer": "Avenger",
+  "model": "A2033",
+  "status": "available"
 }
 ```
 
-## Starter Firestore rules
+### `rentals`
+Each document is one booking / rental record.
 
-```txt
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if request.auth != null;
-    }
-  }
-}
-```
+## Included pages
+- Overview
+- Booking
+- Checkout
+- Check-in
+- Equipment
 
-## Good next upgrades
+## XML import
+The XML importer supports common field names such as:
+- `name`
+- `type`
+- `amount`
+- `quantity`
+- `manufacturer`
+- `model`
+- `description`
+- `notes`
 
-- equipment admin page
-- overdue highlighting
-- edit booking flow
-- better stock availability checks
-- barcode scanning
-
-
-## GitHub Actions build note
-
-This project is configured to deploy from GitHub Pages without requiring a committed `package-lock.json`. The workflow uses `npm install` instead of `npm ci`, so your repository can build on GitHub even if you have not generated a lockfile locally yet.
-
-
-## GitHub Pages for this repo
-
-This repo is configured for deployment at:
-
-`https://ragnarutstyr.github.io/Checkout/#/`
-
-If you rename the repository, update `vite.config.js` so the `base` value matches the repo path.
-
-
-## Stability note
-This version includes a client-side error boundary so runtime errors show a message on-screen instead of a blank page.
+If your XML format is different, send a sample and it can be adapted.
