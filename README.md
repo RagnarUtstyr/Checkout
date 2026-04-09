@@ -102,3 +102,8 @@ service cloud.firestore {
 - edit booking flow
 - better stock availability checks
 - barcode scanning
+
+
+## GitHub Actions build note
+
+This project is configured to deploy from GitHub Pages without requiring a committed `package-lock.json`. The workflow uses `npm install` instead of `npm ci`, so your repository can build on GitHub even if you have not generated a lockfile locally yet.
