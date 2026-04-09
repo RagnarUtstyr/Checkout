@@ -107,3 +107,12 @@ service cloud.firestore {
 ## GitHub Actions build note
 
 This project is configured to deploy from GitHub Pages without requiring a committed `package-lock.json`. The workflow uses `npm install` instead of `npm ci`, so your repository can build on GitHub even if you have not generated a lockfile locally yet.
+
+
+## GitHub Pages for this repo
+
+This repo is configured for deployment at:
+
+`https://ragnarutstyr.github.io/Checkout/#/`
+
+If you rename the repository, update `vite.config.js` so the `base` value matches the repo path.
