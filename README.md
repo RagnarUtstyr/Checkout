@@ -1,50 +1,75 @@
 # Rental Equipment Tracker
 
-A Firebase-backed React app for managing bookings, checkouts, and check-ins of rental equipment.
+A GitHub Pages hosted React app that uses Firebase Authentication and Cloud Firestore for bookings, checkouts, and check-ins.
 
-## Features
+## What this version does
 
-- Login with Google or email/password
-- Dashboard with active bookings and current checkouts
-- Booking creation with renter details and equipment list
-- Checkout workflow with pick/confirm equipment items
-- Check-in workflow to mark returned equipment
-- Firestore-backed records with timestamps and status history
+- GitHub hosts the frontend with **GitHub Pages**
+- The page reads and writes data directly to **Firebase**
+- Users sign in with **Google** or **email/password** using Firebase Authentication
+- No local install is required for deployment if you push through GitHub
 
-## Tech stack
+## Important setup you already have most of
 
-- React + Vite
-- Firebase Authentication
-- Cloud Firestore
+In Firebase, make sure all of these are enabled:
 
-## Setup
+- Authentication → **Google**
+- Authentication → **Email/Password**
+- Firestore database
 
-1. Create a Firebase project.
-2. Enable **Authentication**:
-   - Google provider
-   - Email/Password provider
-3. Create a **Cloud Firestore** database in production or test mode.
-4. Your Firebase config has already been filled into `.env` and `.env.example` for project `checkout-52442`.
-5. Install dependencies:
+## One extra Firebase step for GitHub Pages login
 
-   ```bash
-   npm install
-   ```
+Add your GitHub Pages domain to **Authentication → Settings → Authorized domains**.
 
-6. Start the app:
+For a GitHub Pages site like:
 
-   ```bash
-   npm run dev
-   ```
+- `https://YOUR-USERNAME.github.io/YOUR-REPO/`
+
+add this domain:
+
+- `YOUR-USERNAME.github.io`
+
+That domain authorization matters for Firebase Auth on web apps.
+
+## How to publish from GitHub without installing anything locally
+
+1. Create a GitHub repository.
+2. Upload all project files to the repository.
+3. In GitHub, open **Settings → Pages**.
+4. Under **Build and deployment**, choose **GitHub Actions**.
+5. Push to the `main` branch.
+6. GitHub Actions will install dependencies, build the app, and publish it.
+
+The workflow file is already included here:
+
+- `.github/workflows/deploy.yml`
+
+## Routing for GitHub Pages
+
+This app uses `HashRouter`, so the URLs look like:
+
+- `/#/`
+- `/#/booking`
+- `/#/checkout`
+- `/#/checkin`
+
+That avoids refresh and deep-link issues on GitHub Pages.
+
+## Firebase config
+
+The app is preconfigured for:
+
+- Project ID: `checkout-52442`
+- Auth domain: `checkout-52442.firebaseapp.com`
+
+The Firebase web config is embedded in the client app as a fallback and can also be overridden with Vite env vars later if you want. For Firebase web apps, the API key is not treated as a secret in the same way as a server credential; your real protection is Firebase Auth plus Firestore Security Rules.
 
 ## Suggested Firestore collections
 
 - `equipment` — equipment catalog
 - `rentals` — bookings/checkouts/check-ins
 
-## Suggested seed data for equipment
-
-Each `equipment` document can look like:
+## Suggested equipment document
 
 ```json
 {
@@ -57,9 +82,7 @@ Each `equipment` document can look like:
 }
 ```
 
-## Firestore security rules starter
-
-Adjust to your needs:
+## Starter Firestore rules
 
 ```txt
 rules_version = '2';
@@ -72,22 +95,10 @@ service cloud.firestore {
 }
 ```
 
-## Notes
+## Good next upgrades
 
-This starter is designed so we can continue iterating together. Good next steps:
-
-- Add equipment availability validation
-- Add barcode scanning
-- Add printable checkout/check-in sheets
-- Add roles/admin controls
-- Add search filters and overdue highlighting
-
-
-## Current Firebase project
-
-This starter is preconfigured for:
-
-- Project ID: `checkout-52442`
-- Auth domain: `checkout-52442.firebaseapp.com`
-
-You still need to enable Google sign-in, Email/Password sign-in, and create Firestore in the Firebase console.
+- equipment admin page
+- overdue highlighting
+- edit booking flow
+- better stock availability checks
+- barcode scanning
