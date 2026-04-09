@@ -8,7 +8,7 @@ export default function EquipmentPicker({ catalog, selectedItems, onChange }) {
     if (!query.trim()) return catalog;
     const normalized = query.toLowerCase();
     return catalog.filter((item) => {
-      return [item.name, item.category, item.serialNumber, item.barcode]
+      return [item.displayName, item.name, item.type, item.category, item.serialNumber, item.barcode]
         .filter(Boolean)
         .some((value) => value.toLowerCase().includes(normalized));
     });
@@ -19,8 +19,11 @@ export default function EquipmentPicker({ catalog, selectedItems, onChange }) {
       ...selectedItems,
       {
         equipmentId: item.id,
-        name: item.name,
+        name: item.displayName || item.name,
+        equipmentName: item.name,
+        type: item.type || item.category || '',
         serialNumber: item.serialNumber || '',
+        unitNumber: item.unitNumber || null,
         pickedUp: false,
         returned: false,
       },
@@ -34,7 +37,10 @@ export default function EquipmentPicker({ catalog, selectedItems, onChange }) {
       {
         equipmentId: null,
         name: customItemName.trim(),
+        equipmentName: customItemName.trim(),
+        type: 'Custom',
         serialNumber: '',
+        unitNumber: null,
         pickedUp: false,
         returned: false,
       },
@@ -52,11 +58,11 @@ export default function EquipmentPicker({ catalog, selectedItems, onChange }) {
         <div className="row spread gap-sm wrap align-center">
           <div>
             <h3>Search equipment</h3>
-            <p className="muted">Add items from your Firebase equipment collection.</p>
+            <p className="muted">Add individual items from your Firebase equipment collection.</p>
           </div>
           <input
             className="text-input compact-input"
-            placeholder="Search by name, category, serial…"
+            placeholder="Search by name, type, serial…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -72,9 +78,11 @@ export default function EquipmentPicker({ catalog, selectedItems, onChange }) {
                 onClick={() => addItem(item)}
               >
                 <div>
-                  <strong>{item.name}</strong>
+                  <strong>{item.displayName || item.name}</strong>
                   <div className="muted small-text">
-                    {[item.category, item.serialNumber].filter(Boolean).join(' • ') || 'No details'}
+                    {[item.type || item.category, item.manufacturer, item.model, item.serialNumber]
+                      .filter(Boolean)
+                      .join(' • ') || 'No details'}
                   </div>
                 </div>
                 <span className="plus">+</span>
@@ -103,10 +111,12 @@ export default function EquipmentPicker({ catalog, selectedItems, onChange }) {
         <div className="picker-list selected-list">
           {selectedItems.length ? (
             selectedItems.map((item, index) => (
-              <div key={`${item.name}-${index}`} className="selected-item">
+              <div key={`${item.equipmentId || item.name}-${index}`} className="selected-item">
                 <div>
                   <strong>{item.name}</strong>
-                  <div className="muted small-text">{item.serialNumber || 'No serial number'}</div>
+                  <div className="muted small-text">
+                    {[item.type, item.serialNumber].filter(Boolean).join(' • ') || 'No serial number'}
+                  </div>
                 </div>
                 <button type="button" className="ghost-button" onClick={() => removeItem(index)}>
                   Remove

@@ -6,6 +6,7 @@ const navItems = [
   { to: '/booking', label: 'Booking' },
   { to: '/checkout', label: 'Checkout' },
   { to: '/checkin', label: 'Check-in' },
+  { to: '/equipment', label: 'Equipment' },
 ];
 
 export default function Layout() {

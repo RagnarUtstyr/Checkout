@@ -6,6 +6,7 @@ import DashboardPage from './pages/DashboardPage';
 import BookingPage from './pages/BookingPage';
 import CheckoutPage from './pages/CheckoutPage';
 import CheckinPage from './pages/CheckinPage';
+import EquipmentPage from './pages/EquipmentPage';
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
         <Route path="booking" element={<BookingPage />} />
         <Route path="checkout" element={<CheckoutPage />} />
         <Route path="checkin" element={<CheckinPage />} />
+        <Route path="equipment" element={<EquipmentPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

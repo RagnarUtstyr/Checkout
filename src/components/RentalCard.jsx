@@ -48,7 +48,7 @@ export default function RentalCard({ rental, actions }) {
           {rental.items?.map((item, index) => (
             <div key={`${item.name}-${index}`} className="item-pill">
               <span>{item.name}</span>
-              {item.serialNumber ? <small>#{item.serialNumber}</small> : null}
+              {item.serialNumber ? <small>{item.serialNumber}</small> : null}
             </div>
           ))}
         </div>

@@ -54,6 +54,9 @@ export default function DashboardPage() {
           <Link to="/checkout" className="secondary-button link-button">
             Process checkout
           </Link>
+          <Link to="/equipment" className="secondary-button link-button">
+            Manage equipment
+          </Link>
         </div>
       </div>
 
