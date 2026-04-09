@@ -515,6 +515,7 @@ function setupBookingPage() {
   const selectedEl = getEl('selectedEquipmentList');
   const searchInput = getEl('equipmentSearch');
   if (!resultsEl || !selectedEl || !searchInput) return;
+
   let catalog = [];
 
   getAllEquipment().then((items) => {
@@ -526,34 +527,65 @@ function setupBookingPage() {
     render();
   });
 
+  function getSelectedIds() {
+    return new Set(
+      selectedItems
+        .filter((item) => item.equipmentId)
+        .map((item) => item.equipmentId)
+    );
+  }
+
   const renderSelected = () => {
     selectedEl.innerHTML = selectedItems.length ? selectedItems.map((item, index) => `
       <div class="selected-row">
-        <div><strong>${escapeHtml(item.name)}</strong><div class="muted small">${escapeHtml(item.type || '')}</div></div>
+        <div>
+          <strong>${escapeHtml(item.name)}</strong>
+          <div class="muted small">${escapeHtml(item.type || '')}</div>
+        </div>
         <button class="ghost" type="button" data-remove-index="${index}">Remove</button>
       </div>
     `).join('') : '<div class="muted">No equipment added yet.</div>';
+
     selectedEl.querySelectorAll('[data-remove-index]').forEach((btn) => {
       btn.onclick = () => {
         selectedItems.splice(Number(btn.dataset.removeIndex), 1);
         renderSelected();
+        renderResults();
       };
     });
   };
 
   const renderResults = () => {
     const q = searchInput.value.trim().toLowerCase();
-    const filtered = q ? catalog.filter((item) => [item.displayName, item.name, item.type].filter(Boolean).some((v) => v.toLowerCase().includes(q))) : catalog;
+    const selectedIds = getSelectedIds();
+
+    let filtered = catalog.filter((item) => !selectedIds.has(item.id));
+
+    if (q) {
+      filtered = filtered.filter((item) =>
+        [item.displayName, item.name, item.type]
+          .filter(Boolean)
+          .some((v) => v.toLowerCase().includes(q))
+      );
+    }
+
     resultsEl.innerHTML = filtered.length ? filtered.map((item) => `
       <div class="result-row">
-        <div><strong>${escapeHtml(item.displayName)}</strong><div class="muted small">${escapeHtml([item.type, item.manufacturer, item.model].filter(Boolean).join(' • ') || 'No details')}</div></div>
+        <div>
+          <strong>${escapeHtml(item.displayName)}</strong>
+          <div class="muted small">
+            ${escapeHtml([item.type, item.manufacturer, item.model].filter(Boolean).join(' • ') || 'No details')}
+          </div>
+        </div>
         <button class="secondary" type="button" data-add-id="${item.id}">Add</button>
       </div>
     `).join('') : '<div class="muted">No equipment matches your search.</div>';
+
     resultsEl.querySelectorAll('[data-add-id]').forEach((btn) => {
       btn.onclick = () => {
         const item = catalog.find((row) => row.id === btn.dataset.addId);
         if (!item) return;
+
         selectedItems.push({
           equipmentId: item.id,
           name: item.displayName,
@@ -564,32 +596,52 @@ function setupBookingPage() {
           pickedUp: false,
           returned: false,
         });
+
         renderSelected();
+        renderResults();
       };
     });
   };
 
   searchInput.oninput = renderResults;
+
   const addCustomItemBtn = getEl('addCustomItemBtn');
-  if (addCustomItemBtn) addCustomItemBtn.onclick = () => {
-    const input = getEl('customItemInput');
-    if (!input.value.trim()) return;
-    selectedItems.push({ equipmentId: null, name: input.value.trim(), equipmentName: input.value.trim(), type: 'Custom', pickedUp: false, returned: false });
-    input.value = '';
-    renderSelected();
-  };
+  if (addCustomItemBtn) {
+    addCustomItemBtn.onclick = () => {
+      const input = getEl('customItemInput');
+      if (!input || !input.value.trim()) return;
+
+      selectedItems.push({
+        equipmentId: null,
+        name: input.value.trim(),
+        equipmentName: input.value.trim(),
+        type: 'Custom',
+        pickedUp: false,
+        returned: false,
+      });
+
+      input.value = '';
+      renderSelected();
+      renderResults();
+    };
+  }
+
   renderSelected();
 
   const bookingForm = getEl('bookingForm');
   if (!bookingForm) return;
+
   bookingForm.onsubmit = async (event) => {
     event.preventDefault();
+
     if (!selectedItems.length) {
       setFlash({ error: 'Add at least one equipment item before saving.' });
       render();
       return;
     }
+
     const form = new FormData(event.currentTarget);
+
     try {
       await createRental({
         renterName: form.get('renterName'),
@@ -601,6 +653,7 @@ function setupBookingPage() {
         notes: form.get('notes'),
         items: selectedItems,
       });
+
       setFlash({ notice: 'Booking created successfully.' });
       setRoute('/');
     } catch (error) {
@@ -609,7 +662,6 @@ function setupBookingPage() {
     }
   };
 }
-
 function renderCheckout() {
   return shell(`
     <div class="page-header"><div><div class="eyebrow">Checkout</div><h2>Prepare equipment pickup</h2><p>Find the booking, tick off found items, add extra items, or remove unwanted ones.</p></div></div>
