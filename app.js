@@ -54,6 +54,12 @@ function setRoute(route) {
   location.hash = route;
 }
 
+function getRouteInfo() {
+  const raw = state.route || '/';
+  const [path, queryString = ''] = raw.split('?');
+  return { path, params: new URLSearchParams(queryString) };
+}
+
 function escapeHtml(value = '') {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -798,11 +804,13 @@ function setupCheckinPage() {
 
 
 function renderEquipment() {
+  const routeInfo = getRouteInfo();
+  const selectedGroup = routeInfo.params.get('group') || '';
   return shell(`
-    <div class="page-header"><div><div class="eyebrow">Equipment</div><h2>Manage your equipment inventory</h2><p>The page loads instantly from GitHub. Only the inventory list and save actions talk to Firebase.</p></div></div>
-    <section class="grid two">
+    <div class="page-header"><div><div class="eyebrow">Equipment</div><h2>Manage your equipment inventory</h2><p>See one row per equipment type, then open a group to manage the individual units.</p></div></div>
+    <section class="grid two equipment-top-grid">
       <form id="equipmentForm" class="card stack">
-        <div><h3>Add equipment</h3><div class="muted small">Amount creates units like C-Stand #1, C-Stand #2 and so on.</div></div>
+        <div><h3>Add new equipment type</h3><div class="muted small">Create a new equipment group and the first numbered units in one step.</div></div>
         <div class="grid two">
           <div><label>Name</label><input name="name" required /></div>
           <div><label>Type</label><input name="type" required /></div>
@@ -812,7 +820,7 @@ function renderEquipment() {
           <div><label>Description</label><input name="description" /></div>
         </div>
         <div><label>Notes</label><textarea name="notes"></textarea></div>
-        <div class="row"><button class="primary" type="submit">Add equipment</button></div>
+        <div class="row"><button class="primary" type="submit">Add equipment type</button></div>
       </form>
       <section class="card stack">
         <div><h3>Import XML</h3><div class="muted small">Supports common tags like name, type, amount, quantity, manufacturer and model.</div></div>
@@ -821,37 +829,121 @@ function renderEquipment() {
         <div class="row"><button class="secondary" id="importXmlBtn" type="button" disabled>Import XML</button></div>
       </section>
     </section>
-    <section class="card stack">
-      <div class="row spread"><div><h3>Inventory</h3><div class="muted small">Grouped by equipment name and type.</div></div><input id="equipmentFilter" placeholder="Filter equipment" style="max-width:240px" /></div>
-      <div class="list" id="equipmentGroupsList"><div class="muted">Loading inventory…</div></div>
+    <section class="grid two equipment-main-grid">
+      <section class="card stack">
+        <div class="row spread"><div><h3>Equipment list</h3><div class="muted small">One row per equipment type with total and available counts.</div></div><input id="equipmentFilter" placeholder="Filter equipment" style="max-width:240px" /></div>
+        <div class="list equipment-summary-list" id="equipmentGroupsList"><div class="muted">Loading inventory…</div></div>
+      </section>
+      <section class="card stack equipment-detail-card" id="equipmentDetailPanel" data-selected-group="${escapeHtml(selectedGroup)}">
+        <div>
+          <h3>Equipment details</h3>
+          <div class="muted small">Open a row on the left to see and manage the individual units.</div>
+        </div>
+        <div class="muted">No equipment group selected.</div>
+      </section>
     </section>
   `);
 }
 
-function equipmentGroupMarkup(group) {
+function equipmentGroupSummaryMarkup(group, selectedGroup) {
+  const isActive = selectedGroup === group.key;
   return `
-    <article class="equipment-group card" data-filterable="${escapeHtml(`${group.name} ${group.type} ${group.manufacturer} ${group.model}`.toLowerCase())}">
+    <article class="equipment-summary-row ${isActive ? 'active' : ''}" data-filterable="${escapeHtml(`${group.name} ${group.type} ${group.manufacturer} ${group.model}`.toLowerCase())}">
+      <button class="equipment-summary-button" type="button" data-open-group="${escapeHtml(group.key)}">
+        <div class="equipment-summary-main">
+          <div>
+            <h3>${escapeHtml(group.name)}</h3>
+            <div class="muted">${escapeHtml([group.type, group.manufacturer, group.model].filter(Boolean).join(' • ') || 'No details')}</div>
+          </div>
+          <div class="equipment-summary-counts">
+            <span class="badge">${group.amount} total</span>
+            <span class="badge">${group.availableCount} available</span>
+          </div>
+        </div>
+      </button>
+    </article>
+  `;
+}
+
+function equipmentDetailMarkup(group) {
+  return `
+    <div class="row spread">
+      <div>
+        <div class="eyebrow">${escapeHtml(group.type)}</div>
+        <h3>${escapeHtml(group.name)}</h3>
+        <div class="muted">${escapeHtml([group.manufacturer, group.model].filter(Boolean).join(' • ') || 'No manufacturer or model set')}</div>
+      </div>
+      <div class="row">
+        <span class="badge">${group.amount} total</span>
+        <span class="badge">${group.availableCount} available</span>
+      </div>
+    </div>
+    ${group.description ? `<div class="muted small">${escapeHtml(group.description)}</div>` : ''}
+    ${group.notes ? `<div class="muted small">Notes: ${escapeHtml(group.notes)}</div>` : ''}
+    <form id="addUnitsForm" class="card stack subtle-card">
       <div class="row spread">
         <div>
-          <h3>${escapeHtml(group.name)}</h3>
-          <div class="muted">${escapeHtml([group.type, group.manufacturer, group.model].filter(Boolean).join(' • ') || 'No details')}</div>
+          <h4>Add more ${escapeHtml(group.name)}</h4>
+          <div class="muted small">New units will continue the numbering for this equipment type.</div>
         </div>
-        <div class="row"><span class="badge">${group.amount} total</span><span class="badge">${group.availableCount} available</span></div>
       </div>
-      ${group.description ? `<div class="muted small">${escapeHtml(group.description)}</div>` : ''}
-      <div class="equipment-items">${group.items.map((item) => `<div class="result-row"><div><strong>${escapeHtml(item.displayName)}</strong><div class="muted small">${escapeHtml(item.status)}</div></div><button class="danger" type="button" data-delete-equipment="${item.id}">Remove</button></div>`).join('')}</div>
-    </article>
+      <div class="row add-units-row">
+        <div class="inline-field">
+          <label>Amount</label>
+          <input type="number" min="1" name="amount" value="1" required />
+        </div>
+        <button class="primary" type="submit">Add units</button>
+      </div>
+    </form>
+    <div class="stack">
+      <div class="row spread"><h4>Individual units</h4><span class="muted small">Remove only the specific unit you no longer want in inventory.</span></div>
+      <div class="equipment-unit-list">
+        ${group.items.map((item) => `
+          <div class="equipment-unit-row">
+            <div>
+              <strong>${escapeHtml(item.displayName)}</strong>
+              <div class="muted small">${escapeHtml(item.status)}${item.location ? ` • ${escapeHtml(item.location)}` : ''}</div>
+            </div>
+            <button class="danger" type="button" data-delete-equipment="${item.id}">Remove</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
   `;
 }
 
 function setupEquipmentPage() {
   const routeBase = '/equipment';
   let importRows = [];
+  const routeInfo = getRouteInfo();
+  const selectedGroup = routeInfo.params.get('group') || '';
+
   getEquipmentGroups().then((groups) => {
     if (!isCurrentRoute(routeBase)) return;
     const listEl = document.getElementById('equipmentGroupsList');
-    if (!listEl) return;
-    listEl.innerHTML = groups.length ? groups.map((group) => equipmentGroupMarkup(group)).join('') : '<div class="muted">No equipment added yet.</div>';
+    const detailEl = document.getElementById('equipmentDetailPanel');
+    if (listEl) {
+      listEl.innerHTML = groups.length
+        ? groups.map((group) => equipmentGroupSummaryMarkup(group, selectedGroup)).join('')
+        : '<div class="muted">No equipment added yet.</div>';
+    }
+    document.querySelectorAll('[data-open-group]').forEach((btn) => {
+      btn.onclick = () => setRoute(`/equipment?group=${encodeURIComponent(btn.dataset.openGroup)}`);
+    });
+
+    const chosenGroup = groups.find((group) => group.key === selectedGroup);
+    if (detailEl) {
+      detailEl.innerHTML = chosenGroup
+        ? equipmentDetailMarkup(chosenGroup)
+        : `
+          <div>
+            <h3>Equipment details</h3>
+            <div class="muted small">Open a row on the left to see and manage the individual units.</div>
+          </div>
+          <div class="muted">No equipment group selected.</div>
+        `;
+    }
+
     document.querySelectorAll('[data-delete-equipment]').forEach((btn) => {
       btn.onclick = async () => {
         if (!confirm('Remove this individual equipment item?')) return;
@@ -865,10 +957,37 @@ function setupEquipmentPage() {
         }
       };
     });
+
+    const addUnitsForm = getEl('addUnitsForm');
+    if (addUnitsForm && chosenGroup) {
+      addUnitsForm.onsubmit = async (event) => {
+        event.preventDefault();
+        const values = new FormData(addUnitsForm);
+        try {
+          await createEquipmentGroup({
+            name: chosenGroup.name,
+            type: chosenGroup.type,
+            amount: values.get('amount'),
+            manufacturer: chosenGroup.manufacturer,
+            model: chosenGroup.model,
+            description: chosenGroup.description,
+            notes: chosenGroup.notes,
+          });
+          setFlash({ notice: `${chosenGroup.name} updated.` });
+          render();
+        } catch (error) {
+          setFlash({ error: error.message || 'Failed to add equipment units.' });
+          render();
+        }
+      };
+    }
   }).catch((error) => {
     const listEl = document.getElementById('equipmentGroupsList');
+    const detailEl = document.getElementById('equipmentDetailPanel');
     if (listEl) listEl.innerHTML = '<div class="error">Failed to load inventory.</div>';
+    if (detailEl) detailEl.innerHTML = `<div class="error">${escapeHtml(error.message || 'Failed to load equipment details.')}</div>`;
   });
+
   const form = getEl('equipmentForm');
   const xmlInput = getEl('xmlFileInput');
   const xmlPreview = getEl('xmlPreview');
