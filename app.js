@@ -89,6 +89,28 @@ function setFlash({ notice = '', error = '' } = {}) {
   state.error = error;
 }
 
+function isCurrentRoute(routeBase) {
+  return state.route.split('?')[0] === routeBase;
+}
+
+function getEl(id) {
+  return document.getElementById(id);
+}
+
+function setHtmlIfPresent(id, html) {
+  const el = getEl(id);
+  if (!el) return false;
+  el.innerHTML = html;
+  return true;
+}
+
+function setTextIfPresent(id, text) {
+  const el = getEl(id);
+  if (!el) return false;
+  el.textContent = text;
+  return true;
+}
+
 function flashMarkup() {
   return `${state.error ? `<div class="error">${escapeHtml(state.error)}</div>` : ''}${state.notice ? `<div class="success">${escapeHtml(state.notice)}</div>` : ''}`;
 }
@@ -425,7 +447,9 @@ function renderDashboard() {
 }
 
 function setupDashboardPage() {
+  const routeBase = '/';
   getRentalsByStatuses(['booked', 'checked_out']).then((rentals) => {
+    if (!isCurrentRoute(routeBase)) return;
     const booked = rentals.filter((r) => r.status === 'booked');
     const checkedOut = rentals.filter((r) => r.status === 'checked_out');
     const stats = {
@@ -434,16 +458,16 @@ function setupDashboardPage() {
       returnsToday: rentals.filter((r) => new Date(r.returnDate).toDateString() === new Date().toDateString()).length,
       overdue: checkedOut.filter((r) => daysUntil(r.returnDate) < 0).length,
     };
-    document.getElementById('dashboardStats').innerHTML = `
+    if (!setHtmlIfPresent('dashboardStats', `
       <div class="card stat"><div class="muted small">Active rentals</div><strong>${stats.active}</strong></div>
       <div class="card stat"><div class="muted small">Pickups today</div><strong>${stats.pickupsToday}</strong></div>
       <div class="card stat"><div class="muted small">Returns today</div><strong>${stats.returnsToday}</strong></div>
       <div class="card stat"><div class="muted small">Overdue</div><strong>${stats.overdue}</strong></div>
-    `;
-    document.getElementById('bookedCount').textContent = booked.length;
-    document.getElementById('checkedOutCount').textContent = checkedOut.length;
-    document.getElementById('dashboardBooked').innerHTML = booked.length ? booked.map((r) => rentalCard(r, '/checkout', 'Start checkout')).join('') : '<div class="card">No upcoming bookings.</div>';
-    document.getElementById('dashboardCheckedOut').innerHTML = checkedOut.length ? checkedOut.map((r) => rentalCard(r, '/checkin', 'Start check-in')).join('') : '<div class="card">Nothing is currently checked out.</div>';
+    `)) return;
+    setTextIfPresent('bookedCount', booked.length);
+    setTextIfPresent('checkedOutCount', checkedOut.length);
+    setHtmlIfPresent('dashboardBooked', booked.length ? booked.map((r) => rentalCard(r, '/checkout', 'Start checkout')).join('') : '<div class="card">No upcoming bookings.</div>');
+    setHtmlIfPresent('dashboardCheckedOut', checkedOut.length ? checkedOut.map((r) => rentalCard(r, '/checkin', 'Start check-in')).join('') : '<div class="card">Nothing is currently checked out.</div>');
   }).catch((error) => {
     setFlash({ error: error.message || 'Failed to load overview data.' });
     render();
@@ -479,13 +503,16 @@ function renderBooking() {
 }
 
 function setupBookingPage() {
+  const routeBase = '/booking';
   const selectedItems = [];
-  const resultsEl = document.getElementById('equipmentSearchResults');
-  const selectedEl = document.getElementById('selectedEquipmentList');
-  const searchInput = document.getElementById('equipmentSearch');
+  const resultsEl = getEl('equipmentSearchResults');
+  const selectedEl = getEl('selectedEquipmentList');
+  const searchInput = getEl('equipmentSearch');
+  if (!resultsEl || !selectedEl || !searchInput) return;
   let catalog = [];
 
   getAllEquipment().then((items) => {
+    if (!isCurrentRoute(routeBase)) return;
     catalog = items.filter((item) => item.status !== 'checked_out');
     renderResults();
   }).catch((error) => {
@@ -537,8 +564,9 @@ function setupBookingPage() {
   };
 
   searchInput.oninput = renderResults;
-  document.getElementById('addCustomItemBtn').onclick = () => {
-    const input = document.getElementById('customItemInput');
+  const addCustomItemBtn = getEl('addCustomItemBtn');
+  if (addCustomItemBtn) addCustomItemBtn.onclick = () => {
+    const input = getEl('customItemInput');
     if (!input.value.trim()) return;
     selectedItems.push({ equipmentId: null, name: input.value.trim(), equipmentName: input.value.trim(), type: 'Custom', pickedUp: false, returned: false });
     input.value = '';
@@ -546,7 +574,9 @@ function setupBookingPage() {
   };
   renderSelected();
 
-  document.getElementById('bookingForm').onsubmit = async (event) => {
+  const bookingForm = getEl('bookingForm');
+  if (!bookingForm) return;
+  bookingForm.onsubmit = async (event) => {
     event.preventDefault();
     if (!selectedItems.length) {
       setFlash({ error: 'Add at least one equipment item before saving.' });
@@ -585,14 +615,17 @@ function renderCheckout() {
 }
 
 function setupCheckoutPage() {
-  const select = document.getElementById('checkoutBookingSelect');
-  const details = document.getElementById('checkoutDetails');
+  const routeBase = '/checkout';
+  const select = getEl('checkoutBookingSelect');
+  const details = getEl('checkoutDetails');
+  if (!select || !details) return;
   const bookingId = new URLSearchParams(location.hash.split('?')[1] || '').get('booking') || '';
   if (select) {
     select.onchange = () => setRoute(select.value ? `/checkout?booking=${select.value}` : '/checkout');
   }
 
   getRentalsByStatuses(['booked']).then((bookings) => {
+    if (!isCurrentRoute(routeBase)) return;
     const options = bookings.map((booking) => `<option value="${booking.id}" ${booking.id === bookingId ? 'selected' : ''}>${escapeHtml(booking.renterName)} — ${escapeHtml(formatDate(booking.pickupDate))} to ${escapeHtml(formatDate(booking.returnDate))}</option>`).join('');
     select.innerHTML = `<option value="">Choose a booking…</option>${options}`;
   }).catch((error) => {
@@ -608,6 +641,7 @@ function setupCheckoutPage() {
 
   details.innerHTML = '<section class="card">Loading booking details…</section>';
   Promise.all([getRentalById(bookingId), getAllEquipment()]).then(([rental, catalog]) => {
+    if (!isCurrentRoute(routeBase)) return;
     if (!rental) {
       details.innerHTML = '<section class="card">Booking not found.</section>';
       return;
@@ -624,13 +658,16 @@ function setupCheckoutPage() {
         <div class="row"><button class="primary" id="saveCheckoutBtn">Save checkout</button></div>
       </section>
     `;
-    const list = document.getElementById('checkoutChecklist');
-    const results = document.getElementById('checkoutEquipmentResults');
-    const search = document.getElementById('checkoutEquipmentSearch');
+    const list = getEl('checkoutChecklist');
+    const results = getEl('checkoutEquipmentResults');
+    const search = getEl('checkoutEquipmentSearch');
+    const pickedCountEl = getEl('checkoutPickedCount');
+    const saveCheckoutBtn = getEl('saveCheckoutBtn');
+    if (!list || !results || !search || !pickedCountEl || !saveCheckoutBtn) return;
     const availableCatalog = catalog.filter((item) => item.status !== 'checked_out');
 
     const renderChecklist = () => {
-      document.getElementById('checkoutPickedCount').textContent = `${items.filter((i) => i.pickedUp).length}/${items.length} picked`;
+      pickedCountEl.textContent = `${items.filter((i) => i.pickedUp).length}/${items.length} picked`;
       list.innerHTML = items.length ? items.map((item, index) => `
         <div class="check-row ${item.pickedUp ? 'checked' : ''}">
           <input type="checkbox" data-pick-index="${index}" ${item.pickedUp ? 'checked' : ''} />
@@ -663,7 +700,7 @@ function setupCheckoutPage() {
     renderChecklist();
     renderResults();
 
-    document.getElementById('saveCheckoutBtn').onclick = async () => {
+    saveCheckoutBtn.onclick = async () => {
       try {
         await updateRental(rental.id, { items, status: 'checked_out', checkedOutAt: new Date().toISOString() });
         setFlash({ notice: 'Checkout saved.' });
@@ -690,12 +727,15 @@ function renderCheckin() {
 }
 
 function setupCheckinPage() {
-  const select = document.getElementById('checkinRentalSelect');
-  const details = document.getElementById('checkinDetails');
+  const routeBase = '/checkin';
+  const select = getEl('checkinRentalSelect');
+  const details = getEl('checkinDetails');
+  if (!select || !details) return;
   const bookingId = new URLSearchParams(location.hash.split('?')[1] || '').get('booking') || '';
   if (select) select.onchange = () => setRoute(select.value ? `/checkin?booking=${select.value}` : '/checkin');
 
   getRentalsByStatuses(['checked_out']).then((rentals) => {
+    if (!isCurrentRoute(routeBase)) return;
     const options = rentals.map((rental) => `<option value="${rental.id}" ${rental.id === bookingId ? 'selected' : ''}>${escapeHtml(rental.renterName)} — due ${escapeHtml(formatDate(rental.returnDate))}</option>`).join('');
     select.innerHTML = `<option value="">Choose a checkout…</option>${options}`;
   }).catch((error) => {
@@ -710,15 +750,19 @@ function setupCheckinPage() {
   }
   details.innerHTML = '<section class="card">Loading checkout details…</section>';
   getRentalById(bookingId).then((rental) => {
+    if (!isCurrentRoute(routeBase)) return;
     if (!rental) {
       details.innerHTML = '<section class="card">Checkout not found.</section>';
       return;
     }
     const items = structuredClone(rental.items || []);
     details.innerHTML = `<section class="card stack"><div class="row spread"><div><h3>${escapeHtml(rental.renterName)}</h3><div class="muted">Due ${escapeHtml(formatDate(rental.returnDate))}</div></div><div class="badge" id="checkinReturnedCount">${(items || []).filter((i) => i.returned).length}/${(items || []).length} returned</div></div><div class="checklist" id="checkinChecklist"></div><div class="row"><button class="primary" id="saveCheckinBtn">Save check-in</button></div></section>`;
-    const list = document.getElementById('checkinChecklist');
+    const list = getEl('checkinChecklist');
+    const returnedCountEl = getEl('checkinReturnedCount');
+    const saveCheckinBtn = getEl('saveCheckinBtn');
+    if (!list || !returnedCountEl || !saveCheckinBtn) return;
     const renderChecklist = () => {
-      document.getElementById('checkinReturnedCount').textContent = `${items.filter((i) => i.returned).length}/${items.length} returned`;
+      returnedCountEl.textContent = `${items.filter((i) => i.returned).length}/${items.length} returned`;
       list.innerHTML = items.map((item, index) => `
         <div class="check-row ${item.returned ? 'checked' : ''}">
           <input type="checkbox" data-return-index="${index}" ${item.returned ? 'checked' : ''} />
@@ -734,7 +778,7 @@ function setupCheckinPage() {
       });
     };
     renderChecklist();
-    document.getElementById('saveCheckinBtn').onclick = async () => {
+    saveCheckinBtn.onclick = async () => {
       try {
         const allReturned = items.every((item) => item.returned);
         await updateRental(rental.id, { items, status: allReturned ? 'completed' : 'partial_return', checkedInAt: new Date().toISOString() });
@@ -801,8 +845,10 @@ function equipmentGroupMarkup(group) {
 }
 
 function setupEquipmentPage() {
+  const routeBase = '/equipment';
   let importRows = [];
   getEquipmentGroups().then((groups) => {
+    if (!isCurrentRoute(routeBase)) return;
     const listEl = document.getElementById('equipmentGroupsList');
     if (!listEl) return;
     listEl.innerHTML = groups.length ? groups.map((group) => equipmentGroupMarkup(group)).join('') : '<div class="muted">No equipment added yet.</div>';
@@ -823,11 +869,12 @@ function setupEquipmentPage() {
     const listEl = document.getElementById('equipmentGroupsList');
     if (listEl) listEl.innerHTML = '<div class="error">Failed to load inventory.</div>';
   });
-  const form = document.getElementById('equipmentForm');
-  const xmlInput = document.getElementById('xmlFileInput');
-  const xmlPreview = document.getElementById('xmlPreview');
-  const importBtn = document.getElementById('importXmlBtn');
-  const filterInput = document.getElementById('equipmentFilter');
+  const form = getEl('equipmentForm');
+  const xmlInput = getEl('xmlFileInput');
+  const xmlPreview = getEl('xmlPreview');
+  const importBtn = getEl('importXmlBtn');
+  const filterInput = getEl('equipmentFilter');
+  if (!form || !xmlInput || !xmlPreview || !importBtn || !filterInput) return;
 
   form.onsubmit = async (event) => {
     event.preventDefault();
