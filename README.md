@@ -116,3 +116,7 @@ This repo is configured for deployment at:
 `https://ragnarutstyr.github.io/Checkout/#/`
 
 If you rename the repository, update `vite.config.js` so the `base` value matches the repo path.
+
+
+## Stability note
+This version includes a client-side error boundary so runtime errors show a message on-screen instead of a blank page.

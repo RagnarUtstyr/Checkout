@@ -5,7 +5,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  orderBy,
   query,
   serverTimestamp,
   updateDoc,
@@ -81,6 +80,10 @@ function groupEquipment(items) {
 }
 
 export function parseEquipmentXml(xmlText) {
+  if (typeof DOMParser === 'undefined') {
+    throw new Error('XML import is not available in this browser.');
+  }
+
   const parser = new DOMParser();
   const xml = parser.parseFromString(xmlText, 'text/xml');
   const parserError = xml.querySelector('parsererror');
@@ -151,9 +154,10 @@ export async function getRentalsByStatuses(statuses) {
 }
 
 export async function getAllEquipment() {
-  const q = query(equipmentRef, orderBy('displayName', 'asc'));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((item) => normalizeEquipmentDoc({ id: item.id, ...item.data() }));
+  const snapshot = await getDocs(equipmentRef);
+  return snapshot.docs
+    .map((item) => normalizeEquipmentDoc({ id: item.id, ...item.data() }))
+    .sort((a, b) => (a.displayName || a.name || '').localeCompare(b.displayName || b.name || ''));
 }
 
 export async function getEquipmentGroups() {
