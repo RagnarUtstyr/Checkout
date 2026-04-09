@@ -54,9 +54,9 @@ export default function BookingPage() {
       setMessage('Booking created successfully.');
     } catch (err) {
       setError(err.message || 'Failed to create booking.');
-    } finally {
-      setSaving(false);
     }
+
+    setSaving(false);
   }
 
   return (

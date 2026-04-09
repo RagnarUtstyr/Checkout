@@ -16,6 +16,15 @@ import { db } from './firebase';
 const rentalsRef = collection(db, 'rentals');
 const equipmentRef = collection(db, 'equipment');
 
+function withTimeout(promise, timeoutMs, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]);
+}
+
 function slugify(value) {
   return String(value || '')
     .toLowerCase()
@@ -175,7 +184,7 @@ export async function createEquipmentGroup(payload) {
   const amount = Math.max(1, Number(payload.amount) || 1);
   const groupKey = `${slugify(type)}__${slugify(name)}`;
 
-  const existing = (await getAllEquipment()).filter((item) => item.groupKey === groupKey);
+  const existing = (await withTimeout(getAllEquipment(), 12000, 'Loading equipment took too long. Check your Firestore connection and try again.')).filter((item) => item.groupKey === groupKey);
   const highestUnit = existing.reduce((max, item) => Math.max(max, Number(item.unitNumber) || 0), 0);
 
   const batch = writeBatch(db);
@@ -201,11 +210,11 @@ export async function createEquipmentGroup(payload) {
     });
   }
 
-  await batch.commit();
+  await withTimeout(batch.commit(), 12000, 'Saving equipment took too long. Check your Firestore rules and connection, then try again.');
 }
 
 export async function importEquipmentRows(rows) {
-  const existing = await getAllEquipment();
+  const existing = await withTimeout(getAllEquipment(), 12000, 'Loading equipment took too long. Check your Firestore connection and try again.');
   const highestByGroup = new Map();
 
   existing.forEach((item) => {
@@ -247,7 +256,7 @@ export async function importEquipmentRows(rows) {
     highestByGroup.set(groupKey, nextUnit);
   });
 
-  await batch.commit();
+  await withTimeout(batch.commit(), 12000, 'Importing equipment took too long. Check your Firestore rules and connection, then try again.');
 }
 
 export async function deleteEquipmentItem(equipmentId) {
@@ -255,12 +264,12 @@ export async function deleteEquipmentItem(equipmentId) {
 }
 
 export async function createRental(payload) {
-  const docRef = await addDoc(rentalsRef, {
+  const docRef = await withTimeout(addDoc(rentalsRef, {
     ...payload,
     status: 'booked',
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  });
+  }), 12000, 'Saving booking took too long. Check your Firestore rules and connection, then try again.');
 
   return docRef;
 }

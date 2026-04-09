@@ -68,12 +68,16 @@ export default function EquipmentPage() {
       await createEquipmentGroup(form);
       setForm(initialForm);
       setMessage('Equipment added successfully.');
-      await loadEquipment();
+      setSaving(false);
+      loadEquipment().catch((err) => {
+        setError(err.message || 'Equipment was saved, but the list could not be refreshed.');
+      });
+      return;
     } catch (err) {
       setError(err.message || 'Failed to add equipment.');
-    } finally {
-      setSaving(false);
     }
+
+    setSaving(false);
   }
 
   async function handleRemoveItem(itemId) {
@@ -124,12 +128,16 @@ export default function EquipmentPage() {
       setImportRows([]);
       setImportFileName('');
       setMessage('XML import completed. Equipment was added to the catalog.');
-      await loadEquipment();
+      setSaving(false);
+      loadEquipment().catch((err) => {
+        setError(err.message || 'Equipment was imported, but the list could not be refreshed.');
+      });
+      return;
     } catch (err) {
       setError(err.message || 'Failed to import XML.');
-    } finally {
-      setSaving(false);
     }
+
+    setSaving(false);
   }
 
   return (
