@@ -21,7 +21,6 @@ import {
   where,
   serverTimestamp,
   writeBatch,
-  limit,
 } from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js';
 
 const firebaseConfig = {
@@ -70,20 +69,6 @@ function slugify(value) {
 
 function displayName(name, unitNumber) {
   return unitNumber ? `${name} #${unitNumber}` : name;
-}
-
-
-function withTimeout(promise, ms, label) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} took too long. Please try again.`)), ms)),
-  ]);
-}
-
-async function getEquipmentByGroupKey(groupKey) {
-  const q = query(equipmentRef, where('groupKey', '==', groupKey));
-  const snapshot = await withTimeout(getDocs(q), 15000, 'Loading equipment group');
-  return snapshot.docs.map((snap) => ({ id: snap.id, ...snap.data() }));
 }
 
 function formatDate(value) {
@@ -211,7 +196,7 @@ function renderLogin() {
 }
 
 async function getAllEquipment() {
-  const snapshot = await withTimeout(getDocs(equipmentRef), 15000, 'Loading equipment');
+  const snapshot = await getDocs(equipmentRef);
   return snapshot.docs
     .map((snap) => ({ id: snap.id, ...snap.data() }))
     .map((item) => ({
@@ -258,14 +243,14 @@ async function getEquipmentGroups() {
 async function getRentalsByStatuses(statuses) {
   if (!statuses.length) return [];
   const q = query(rentalsRef, where('status', 'in', statuses));
-  const snapshot = await withTimeout(getDocs(q), 15000, 'Loading rentals');
+  const snapshot = await getDocs(q);
   return snapshot.docs
     .map((snap) => ({ id: snap.id, ...snap.data() }))
     .sort((a, b) => new Date(a.pickupDate || 0) - new Date(b.pickupDate || 0));
 }
 
 async function getRentalById(id) {
-  const snap = await withTimeout(getDoc(doc(db, 'rentals', id)), 15000, 'Loading booking');
+  const snap = await getDoc(doc(db, 'rentals', id));
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 }
 
@@ -274,7 +259,7 @@ async function createEquipmentGroup(payload) {
   const type = (payload.type || 'General').trim();
   const amount = Math.max(1, Number(payload.amount) || 1);
   const groupKey = `${slugify(type)}__${slugify(name)}`;
-  const existing = await getEquipmentByGroupKey(groupKey);
+  const existing = (await getAllEquipment()).filter((item) => item.groupKey === groupKey);
   let highest = existing.reduce((max, item) => Math.max(max, Number(item.unitNumber) || 0), 0);
   const batch = writeBatch(db);
 
@@ -291,16 +276,13 @@ async function createEquipmentGroup(payload) {
       model: payload.model?.trim() || '',
       description: payload.description?.trim() || '',
       notes: payload.notes?.trim() || '',
-      serialNumber: payload.serialNumber?.trim() || '',
-      location: payload.location?.trim() || '',
-      condition: payload.condition?.trim() || 'good',
       status: 'available',
       active: true,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
   }
-  await withTimeout(batch.commit(), 15000, 'Saving equipment');
+  await batch.commit();
 }
 
 function parseEquipmentXml(xmlText) {
@@ -337,12 +319,9 @@ function parseEquipmentXml(xmlText) {
 }
 
 async function importEquipmentRows(rows) {
-  const groupKeys = [...new Set(rows.map((row) => `${slugify((row.type || 'General').trim())}__${slugify(row.name.trim())}`))];
+  const existing = await getAllEquipment();
   const highestByGroup = new Map();
-  for (const groupKey of groupKeys) {
-    const existing = await getEquipmentByGroupKey(groupKey);
-    highestByGroup.set(groupKey, existing.reduce((max, item) => Math.max(max, Number(item.unitNumber) || 0), 0));
-  }
+  existing.forEach((item) => highestByGroup.set(item.groupKey, Math.max(highestByGroup.get(item.groupKey) || 0, item.unitNumber)));
   const batch = writeBatch(db);
   for (const row of rows) {
     const name = row.name.trim();
@@ -371,27 +350,27 @@ async function importEquipmentRows(rows) {
     }
     highestByGroup.set(groupKey, nextUnit);
   }
-  await withTimeout(batch.commit(), 20000, 'Importing XML');
+  await batch.commit();
 }
 
 async function deleteEquipmentItem(id) {
-  await withTimeout(deleteDoc(doc(db, 'equipment', id)), 15000, 'Removing equipment');
+  await deleteDoc(doc(db, 'equipment', id));
 }
 
 async function createRental(payload) {
-  await withTimeout(addDoc(rentalsRef, {
+  await addDoc(rentalsRef, {
     ...payload,
     status: 'booked',
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  }), 15000, 'Saving booking');
+  });
 }
 
 async function updateRental(rentalId, payload) {
-  await withTimeout(updateDoc(doc(db, 'rentals', rentalId), {
+  await updateDoc(doc(db, 'rentals', rentalId), {
     ...payload,
     updatedAt: serverTimestamp(),
-  }), 15000, 'Saving rental update');
+  });
   if (!payload.items?.length) return;
   const batch = writeBatch(db);
   for (const item of payload.items) {
@@ -401,20 +380,11 @@ async function updateRental(rentalId, payload) {
     if (payload.status === 'completed' || payload.status === 'partial_return') nextStatus = item.returned ? 'available' : 'checked_out';
     batch.update(doc(db, 'equipment', item.equipmentId), { status: nextStatus, updatedAt: serverTimestamp() });
   }
-  await withTimeout(batch.commit(), 15000, 'Saving equipment status');
+  await batch.commit();
 }
 
-async function renderDashboard() {
-  const rentals = await getRentalsByStatuses(['booked', 'checked_out']);
-  const booked = rentals.filter((r) => r.status === 'booked');
-  const checkedOut = rentals.filter((r) => r.status === 'checked_out');
-  const stats = {
-    active: rentals.length,
-    pickupsToday: rentals.filter((r) => new Date(r.pickupDate).toDateString() === new Date().toDateString()).length,
-    returnsToday: rentals.filter((r) => new Date(r.returnDate).toDateString() === new Date().toDateString()).length,
-    overdue: checkedOut.filter((r) => daysUntil(r.returnDate) < 0).length,
-  };
-  const rentalCard = (rental, actionRoute, actionLabel) => `
+function rentalCard(rental, actionRoute, actionLabel) {
+  return `
     <article class="card rental-card">
       <div class="row spread">
         <div>
@@ -430,30 +400,57 @@ async function renderDashboard() {
       </div>
       <div class="item-pills">${(rental.items || []).map((item) => `<span class="pill">${escapeHtml(item.name)}</span>`).join('')}</div>
     </article>`;
+}
 
+function renderDashboard() {
   return shell(`
     <div class="page-header">
-      <div><div class="eyebrow">Overview</div><h2>Current bookings and checkouts</h2><p>Track upcoming pickups, due returns, and what is currently out.</p></div>
+      <div><div class="eyebrow">Overview</div><h2>Current bookings and checkouts</h2><p>The page shell is local on GitHub. Lists are loaded from Firebase after the page appears.</p></div>
       <div class="row">
         <a class="btn-link primary" href="#/booking">New booking</a>
         <a class="btn-link secondary" href="#/equipment">Manage equipment</a>
       </div>
     </div>
-    <section class="grid four">
-      <div class="card stat"><div class="muted small">Active rentals</div><strong>${stats.active}</strong></div>
-      <div class="card stat"><div class="muted small">Pickups today</div><strong>${stats.pickupsToday}</strong></div>
-      <div class="card stat"><div class="muted small">Returns today</div><strong>${stats.returnsToday}</strong></div>
-      <div class="card stat"><div class="muted small">Overdue</div><strong>${stats.overdue}</strong></div>
+    <section class="grid four" id="dashboardStats">
+      <div class="card stat"><div class="muted small">Active rentals</div><strong>—</strong></div>
+      <div class="card stat"><div class="muted small">Pickups today</div><strong>—</strong></div>
+      <div class="card stat"><div class="muted small">Returns today</div><strong>—</strong></div>
+      <div class="card stat"><div class="muted small">Overdue</div><strong>—</strong></div>
     </section>
     <section class="grid two">
-      <div class="stack"><div class="row spread"><h3>Upcoming bookings</h3><span class="badge">${booked.length}</span></div>${booked.length ? booked.map((r) => rentalCard(r, '/checkout', 'Start checkout')).join('') : '<div class="card">No upcoming bookings.</div>'}</div>
-      <div class="stack"><div class="row spread"><h3>Currently checked out</h3><span class="badge">${checkedOut.length}</span></div>${checkedOut.length ? checkedOut.map((r) => rentalCard(r, '/checkin', 'Start check-in')).join('') : '<div class="card">Nothing is currently checked out.</div>'}</div>
+      <div class="stack"><div class="row spread"><h3>Upcoming bookings</h3><span class="badge" id="bookedCount">…</span></div><div id="dashboardBooked"><div class="card">Loading bookings…</div></div></div>
+      <div class="stack"><div class="row spread"><h3>Currently checked out</h3><span class="badge" id="checkedOutCount">…</span></div><div id="dashboardCheckedOut"><div class="card">Loading checkouts…</div></div></div>
     </section>
   `);
 }
 
-async function renderBooking() {
-  const catalog = (await getAllEquipment()).filter((item) => item.status !== 'checked_out');
+function setupDashboardPage() {
+  getRentalsByStatuses(['booked', 'checked_out']).then((rentals) => {
+    const booked = rentals.filter((r) => r.status === 'booked');
+    const checkedOut = rentals.filter((r) => r.status === 'checked_out');
+    const stats = {
+      active: rentals.length,
+      pickupsToday: rentals.filter((r) => new Date(r.pickupDate).toDateString() === new Date().toDateString()).length,
+      returnsToday: rentals.filter((r) => new Date(r.returnDate).toDateString() === new Date().toDateString()).length,
+      overdue: checkedOut.filter((r) => daysUntil(r.returnDate) < 0).length,
+    };
+    document.getElementById('dashboardStats').innerHTML = `
+      <div class="card stat"><div class="muted small">Active rentals</div><strong>${stats.active}</strong></div>
+      <div class="card stat"><div class="muted small">Pickups today</div><strong>${stats.pickupsToday}</strong></div>
+      <div class="card stat"><div class="muted small">Returns today</div><strong>${stats.returnsToday}</strong></div>
+      <div class="card stat"><div class="muted small">Overdue</div><strong>${stats.overdue}</strong></div>
+    `;
+    document.getElementById('bookedCount').textContent = booked.length;
+    document.getElementById('checkedOutCount').textContent = checkedOut.length;
+    document.getElementById('dashboardBooked').innerHTML = booked.length ? booked.map((r) => rentalCard(r, '/checkout', 'Start checkout')).join('') : '<div class="card">No upcoming bookings.</div>';
+    document.getElementById('dashboardCheckedOut').innerHTML = checkedOut.length ? checkedOut.map((r) => rentalCard(r, '/checkin', 'Start check-in')).join('') : '<div class="card">Nothing is currently checked out.</div>';
+  }).catch((error) => {
+    setFlash({ error: error.message || 'Failed to load overview data.' });
+    render();
+  });
+}
+
+function renderBooking() {
   return shell(`
     <div class="page-header">
       <div><div class="eyebrow">Booking</div><h2>Create a new booking</h2><p>Add renter details and select individual equipment units.</p></div>
@@ -577,20 +574,48 @@ function setupBookingPage() {
   };
 }
 
-async function renderCheckout() {
-  const bookingId = new URLSearchParams(location.hash.split('?')[1] || '').get('booking') || '';
-  const bookings = await getRentalsByStatuses(['booked']);
-  const catalog = await getAllEquipment();
-  const selected = bookingId ? await getRentalById(bookingId) : null;
-  const options = bookings.map((booking) => `<option value="${booking.id}" ${booking.id === bookingId ? 'selected' : ''}>${escapeHtml(booking.renterName)} — ${escapeHtml(formatDate(booking.pickupDate))} to ${escapeHtml(formatDate(booking.returnDate))}</option>`).join('');
+function renderCheckout() {
   return shell(`
     <div class="page-header"><div><div class="eyebrow">Checkout</div><h2>Prepare equipment pickup</h2><p>Find the booking, tick off found items, add extra items, or remove unwanted ones.</p></div></div>
     <section class="card stack">
-      <div><label>Select booking</label><select id="checkoutBookingSelect"><option value="">Choose a booking…</option>${options}</select></div>
+      <div><label>Select booking</label><select id="checkoutBookingSelect"><option value="">Loading bookings…</option></select></div>
     </section>
-    ${selected ? `
+    <div id="checkoutDetails"></div>
+  `);
+}
+
+function setupCheckoutPage() {
+  const select = document.getElementById('checkoutBookingSelect');
+  const details = document.getElementById('checkoutDetails');
+  const bookingId = new URLSearchParams(location.hash.split('?')[1] || '').get('booking') || '';
+  if (select) {
+    select.onchange = () => setRoute(select.value ? `/checkout?booking=${select.value}` : '/checkout');
+  }
+
+  getRentalsByStatuses(['booked']).then((bookings) => {
+    const options = bookings.map((booking) => `<option value="${booking.id}" ${booking.id === bookingId ? 'selected' : ''}>${escapeHtml(booking.renterName)} — ${escapeHtml(formatDate(booking.pickupDate))} to ${escapeHtml(formatDate(booking.returnDate))}</option>`).join('');
+    select.innerHTML = `<option value="">Choose a booking…</option>${options}`;
+  }).catch((error) => {
+    select.innerHTML = '<option value="">Failed to load bookings</option>';
+    setFlash({ error: error.message || 'Failed to load bookings.' });
+    render();
+  });
+
+  if (!bookingId) {
+    details.innerHTML = '<section class="card">Choose a booking to start checkout.</section>';
+    return;
+  }
+
+  details.innerHTML = '<section class="card">Loading booking details…</section>';
+  Promise.all([getRentalById(bookingId), getAllEquipment()]).then(([rental, catalog]) => {
+    if (!rental) {
+      details.innerHTML = '<section class="card">Booking not found.</section>';
+      return;
+    }
+    const items = structuredClone(rental.items || []);
+    details.innerHTML = `
       <section class="card stack">
-        <div class="row spread"><div><h3>${escapeHtml(selected.renterName)}</h3><div class="muted">Pickup ${escapeHtml(formatDate(selected.pickupDate))} • Return ${escapeHtml(formatDate(selected.returnDate))}</div></div><div class="badge">${(selected.items || []).filter((i) => i.pickedUp).length}/${(selected.items || []).length} picked</div></div>
+        <div class="row spread"><div><h3>${escapeHtml(rental.renterName)}</h3><div class="muted">Pickup ${escapeHtml(formatDate(rental.pickupDate))} • Return ${escapeHtml(formatDate(rental.returnDate))}</div></div><div class="badge" id="checkoutPickedCount">${(items || []).filter((i) => i.pickedUp).length}/${(items || []).length} picked</div></div>
         <div class="checklist" id="checkoutChecklist"></div>
       </section>
       <section class="card stack">
@@ -598,28 +623,14 @@ async function renderCheckout() {
         <div class="search-results" id="checkoutEquipmentResults"></div>
         <div class="row"><button class="primary" id="saveCheckoutBtn">Save checkout</button></div>
       </section>
-    ` : ''}
-  `);
-}
-
-function setupCheckoutPage() {
-  const select = document.getElementById('checkoutBookingSelect');
-  if (select) {
-    select.onchange = () => setRoute(select.value ? `/checkout?booking=${select.value}` : '/checkout');
-  }
-
-  const bookingId = new URLSearchParams(location.hash.split('?')[1] || '').get('booking') || '';
-  if (!bookingId) return;
-
-  Promise.all([getRentalById(bookingId), getAllEquipment()]).then(([rental, catalog]) => {
-    if (!rental) return;
-    const items = structuredClone(rental.items || []);
+    `;
     const list = document.getElementById('checkoutChecklist');
     const results = document.getElementById('checkoutEquipmentResults');
     const search = document.getElementById('checkoutEquipmentSearch');
     const availableCatalog = catalog.filter((item) => item.status !== 'checked_out');
 
     const renderChecklist = () => {
+      document.getElementById('checkoutPickedCount').textContent = `${items.filter((i) => i.pickedUp).length}/${items.length} picked`;
       list.innerHTML = items.length ? items.map((item, index) => `
         <div class="check-row ${item.pickedUp ? 'checked' : ''}">
           <input type="checkbox" data-pick-index="${index}" ${item.pickedUp ? 'checked' : ''} />
@@ -663,33 +674,51 @@ function setupCheckoutPage() {
       }
     };
   }).catch((error) => {
+    details.innerHTML = '<section class="card">Failed to load checkout data.</section>';
     setFlash({ error: error.message || 'Failed to load checkout data.' });
     render();
   });
 }
 
-async function renderCheckin() {
-  const bookingId = new URLSearchParams(location.hash.split('?')[1] || '').get('booking') || '';
-  const rentals = await getRentalsByStatuses(['checked_out']);
-  const selected = bookingId ? await getRentalById(bookingId) : null;
-  const options = rentals.map((rental) => `<option value="${rental.id}" ${rental.id === bookingId ? 'selected' : ''}>${escapeHtml(rental.renterName)} — due ${escapeHtml(formatDate(rental.returnDate))}</option>`).join('');
+
+function renderCheckin() {
   return shell(`
     <div class="page-header"><div><div class="eyebrow">Check-in</div><h2>Register returned equipment</h2><p>Tick off each item as it comes back.</p></div></div>
-    <section class="card"><label>Select active checkout</label><select id="checkinRentalSelect"><option value="">Choose a checkout…</option>${options}</select></section>
-    ${selected ? `<section class="card stack"><div class="row spread"><div><h3>${escapeHtml(selected.renterName)}</h3><div class="muted">Due ${escapeHtml(formatDate(selected.returnDate))}</div></div><div class="badge">${(selected.items || []).filter((i) => i.returned).length}/${(selected.items || []).length} returned</div></div><div class="checklist" id="checkinChecklist"></div><div class="row"><button class="primary" id="saveCheckinBtn">Save check-in</button></div></section>` : ''}
+    <section class="card"><label>Select active checkout</label><select id="checkinRentalSelect"><option value="">Loading active checkouts…</option></select></section>
+    <div id="checkinDetails"></div>
   `);
 }
 
 function setupCheckinPage() {
   const select = document.getElementById('checkinRentalSelect');
-  if (select) select.onchange = () => setRoute(select.value ? `/checkin?booking=${select.value}` : '/checkin');
+  const details = document.getElementById('checkinDetails');
   const bookingId = new URLSearchParams(location.hash.split('?')[1] || '').get('booking') || '';
-  if (!bookingId) return;
+  if (select) select.onchange = () => setRoute(select.value ? `/checkin?booking=${select.value}` : '/checkin');
+
+  getRentalsByStatuses(['checked_out']).then((rentals) => {
+    const options = rentals.map((rental) => `<option value="${rental.id}" ${rental.id === bookingId ? 'selected' : ''}>${escapeHtml(rental.renterName)} — due ${escapeHtml(formatDate(rental.returnDate))}</option>`).join('');
+    select.innerHTML = `<option value="">Choose a checkout…</option>${options}`;
+  }).catch((error) => {
+    select.innerHTML = '<option value="">Failed to load checkouts</option>';
+    setFlash({ error: error.message || 'Failed to load active checkouts.' });
+    render();
+  });
+
+  if (!bookingId) {
+    details.innerHTML = '<section class="card">Choose an active checkout to start check-in.</section>';
+    return;
+  }
+  details.innerHTML = '<section class="card">Loading checkout details…</section>';
   getRentalById(bookingId).then((rental) => {
-    if (!rental) return;
+    if (!rental) {
+      details.innerHTML = '<section class="card">Checkout not found.</section>';
+      return;
+    }
     const items = structuredClone(rental.items || []);
+    details.innerHTML = `<section class="card stack"><div class="row spread"><div><h3>${escapeHtml(rental.renterName)}</h3><div class="muted">Due ${escapeHtml(formatDate(rental.returnDate))}</div></div><div class="badge" id="checkinReturnedCount">${(items || []).filter((i) => i.returned).length}/${(items || []).length} returned</div></div><div class="checklist" id="checkinChecklist"></div><div class="row"><button class="primary" id="saveCheckinBtn">Save check-in</button></div></section>`;
     const list = document.getElementById('checkinChecklist');
     const renderChecklist = () => {
+      document.getElementById('checkinReturnedCount').textContent = `${items.filter((i) => i.returned).length}/${items.length} returned`;
       list.innerHTML = items.map((item, index) => `
         <div class="check-row ${item.returned ? 'checked' : ''}">
           <input type="checkbox" data-return-index="${index}" ${item.returned ? 'checked' : ''} />
@@ -717,15 +746,16 @@ function setupCheckinPage() {
       }
     };
   }).catch((error) => {
+    details.innerHTML = '<section class="card">Failed to load rental details.</section>';
     setFlash({ error: error.message || 'Failed to load rental details.' });
     render();
   });
 }
 
-async function renderEquipment() {
-  const groups = await getEquipmentGroups();
+
+function renderEquipment() {
   return shell(`
-    <div class="page-header"><div><div class="eyebrow">Equipment</div><h2>Manage your equipment inventory</h2><p>Add equipment in batches, import XML, and track each individual unit.</p></div></div>
+    <div class="page-header"><div><div class="eyebrow">Equipment</div><h2>Manage your equipment inventory</h2><p>The page loads instantly from GitHub. Only the inventory list and save actions talk to Firebase.</p></div></div>
     <section class="grid two">
       <form id="equipmentForm" class="card stack">
         <div><h3>Add equipment</h3><div class="muted small">Amount creates units like C-Stand #1, C-Stand #2 and so on.</div></div>
@@ -735,8 +765,6 @@ async function renderEquipment() {
           <div><label>Amount</label><input type="number" min="1" name="amount" value="1" required /></div>
           <div><label>Manufacturer</label><input name="manufacturer" /></div>
           <div><label>Model</label><input name="model" /></div>
-          <div><label>Storage location</label><input name="location" /></div>
-          <div><label>Condition</label><select name="condition"><option value="good">Good</option><option value="needs_service">Needs service</option><option value="damaged">Damaged</option></select></div>
           <div><label>Description</label><input name="description" /></div>
         </div>
         <div><label>Notes</label><textarea name="notes"></textarea></div>
@@ -751,9 +779,7 @@ async function renderEquipment() {
     </section>
     <section class="card stack">
       <div class="row spread"><div><h3>Inventory</h3><div class="muted small">Grouped by equipment name and type.</div></div><input id="equipmentFilter" placeholder="Filter equipment" style="max-width:240px" /></div>
-      <div class="list" id="equipmentGroupsList">
-        ${groups.length ? groups.map((group) => equipmentGroupMarkup(group)).join('') : '<div class="muted">No equipment added yet.</div>'}
-      </div>
+      <div class="list" id="equipmentGroupsList"><div class="muted">Loading inventory…</div></div>
     </section>
   `);
 }
@@ -769,13 +795,34 @@ function equipmentGroupMarkup(group) {
         <div class="row"><span class="badge">${group.amount} total</span><span class="badge">${group.availableCount} available</span></div>
       </div>
       ${group.description ? `<div class="muted small">${escapeHtml(group.description)}</div>` : ''}
-      <div class="equipment-items">${group.items.map((item) => `<div class="result-row"><div><strong>${escapeHtml(item.displayName)}</strong><div class="muted small">${escapeHtml([item.status, item.location].filter(Boolean).join(' • ') || 'available')}</div></div><button class="danger" type="button" data-delete-equipment="${item.id}">Remove</button></div>`).join('')}</div>
+      <div class="equipment-items">${group.items.map((item) => `<div class="result-row"><div><strong>${escapeHtml(item.displayName)}</strong><div class="muted small">${escapeHtml(item.status)}</div></div><button class="danger" type="button" data-delete-equipment="${item.id}">Remove</button></div>`).join('')}</div>
     </article>
   `;
 }
 
 function setupEquipmentPage() {
   let importRows = [];
+  getEquipmentGroups().then((groups) => {
+    const listEl = document.getElementById('equipmentGroupsList');
+    if (!listEl) return;
+    listEl.innerHTML = groups.length ? groups.map((group) => equipmentGroupMarkup(group)).join('') : '<div class="muted">No equipment added yet.</div>';
+    document.querySelectorAll('[data-delete-equipment]').forEach((btn) => {
+      btn.onclick = async () => {
+        if (!confirm('Remove this individual equipment item?')) return;
+        try {
+          await deleteEquipmentItem(btn.dataset.deleteEquipment);
+          setFlash({ notice: 'Equipment item removed.' });
+          render();
+        } catch (error) {
+          setFlash({ error: error.message || 'Failed to remove equipment item.' });
+          render();
+        }
+      };
+    });
+  }).catch((error) => {
+    const listEl = document.getElementById('equipmentGroupsList');
+    if (listEl) listEl.innerHTML = '<div class="error">Failed to load inventory.</div>';
+  });
   const form = document.getElementById('equipmentForm');
   const xmlInput = document.getElementById('xmlFileInput');
   const xmlPreview = document.getElementById('xmlPreview');
@@ -784,18 +831,12 @@ function setupEquipmentPage() {
 
   form.onsubmit = async (event) => {
     event.preventDefault();
-    const submitBtn = form.querySelector('button[type="submit"]');
-    const originalLabel = submitBtn.textContent;
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Saving…';
     const values = new FormData(form);
     try {
       await createEquipmentGroup(Object.fromEntries(values.entries()));
       setFlash({ notice: 'Equipment added successfully.' });
       render();
     } catch (error) {
-      submitBtn.disabled = false;
-      submitBtn.textContent = originalLabel;
       setFlash({ error: error.message || 'Failed to add equipment.' });
       render();
     }
@@ -816,34 +857,15 @@ function setupEquipmentPage() {
   };
 
   importBtn.onclick = async () => {
-    const originalLabel = importBtn.textContent;
-    importBtn.disabled = true;
-    importBtn.textContent = 'Importing…';
     try {
       await importEquipmentRows(importRows);
       setFlash({ notice: 'XML import completed.' });
       render();
     } catch (error) {
-      importBtn.disabled = false;
-      importBtn.textContent = originalLabel;
       setFlash({ error: error.message || 'Failed to import XML.' });
       render();
     }
   };
-
-  document.querySelectorAll('[data-delete-equipment]').forEach((btn) => {
-    btn.onclick = async () => {
-      if (!confirm('Remove this individual equipment item?')) return;
-      try {
-        await deleteEquipmentItem(btn.dataset.deleteEquipment);
-        setFlash({ notice: 'Equipment item removed.' });
-        render();
-      } catch (error) {
-        setFlash({ error: error.message || 'Failed to remove equipment item.' });
-        render();
-      }
-    };
-  });
 
   filterInput.oninput = () => {
     const q = filterInput.value.trim().toLowerCase();
@@ -892,6 +914,7 @@ function setupRoute() {
       setupEquipmentPage();
       break;
     default:
+      setupDashboardPage();
       break;
   }
 }
@@ -904,7 +927,6 @@ async function render() {
     return;
   }
   try {
-    appEl.innerHTML = '<div class="auth-shell"><div class="card auth-card">Loading…</div></div>';
     appEl.innerHTML = await renderRoute();
     setupRoute();
   } catch (error) {
