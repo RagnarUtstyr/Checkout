@@ -44,7 +44,6 @@ const state = {
   user: null,
   route: getRoute(),
   flash: { notice: '', error: '' },
-  modalGroupKey: '',
   theme: getSavedTheme(),
 };
 
@@ -112,7 +111,6 @@ function fmtDate(value) {
   const date = new Date(`${iso}T12:00:00`);
   return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' }).format(date);
 }
-
 function timestampMs(value) {
   if (!value) return 0;
   if (typeof value === 'number') return value;
@@ -144,21 +142,11 @@ function sortRentals(rentals, sortBy) {
   const list = [...rentals];
   const cmpText = (a, b) => String(a.renterName || a.company || '').localeCompare(String(b.renterName || b.company || ''));
   list.sort((a, b) => {
-    if (sortBy === 'out_asc') {
-      return dateOnly(a.pickupDate).localeCompare(dateOnly(b.pickupDate)) || cmpText(a, b);
-    }
-    if (sortBy === 'out_desc') {
-      return dateOnly(b.pickupDate).localeCompare(dateOnly(a.pickupDate)) || cmpText(a, b);
-    }
-    if (sortBy === 'in_desc') {
-      return dateOnly(b.returnDate).localeCompare(dateOnly(a.returnDate)) || cmpText(a, b);
-    }
-    if (sortBy === 'newest') {
-      return timestampMs(b.createdAt) - timestampMs(a.createdAt) || cmpText(a, b);
-    }
-    if (sortBy === 'oldest') {
-      return timestampMs(a.createdAt) - timestampMs(b.createdAt) || cmpText(a, b);
-    }
+    if (sortBy === 'out_asc') return dateOnly(a.pickupDate).localeCompare(dateOnly(b.pickupDate)) || cmpText(a, b);
+    if (sortBy === 'out_desc') return dateOnly(b.pickupDate).localeCompare(dateOnly(a.pickupDate)) || cmpText(a, b);
+    if (sortBy === 'in_desc') return dateOnly(b.returnDate).localeCompare(dateOnly(a.returnDate)) || cmpText(a, b);
+    if (sortBy === 'newest') return timestampMs(b.createdAt) - timestampMs(a.createdAt) || cmpText(a, b);
+    if (sortBy === 'oldest') return timestampMs(a.createdAt) - timestampMs(b.createdAt) || cmpText(a, b);
     if (sortBy === 'overdue_first') {
       const aOver = ['checked_out', 'partial_return'].includes(a.status) && dateOnly(a.returnDate) < today ? 0 : 1;
       const bOver = ['checked_out', 'partial_return'].includes(b.status) && dateOnly(b.returnDate) < today ? 0 : 1;
@@ -186,6 +174,19 @@ function readArray(value) {
 }
 function sortByName(items) {
   return [...items].sort((a, b) => String(a.displayName || a.name || '').localeCompare(String(b.displayName || b.name || '')));
+}
+function cardHrefForRental(rental) {
+  if (rental.status === 'booked') return `#/checkout?id=${encodeURIComponent(rental.id)}`;
+  if (['checked_out', 'partial_return'].includes(rental.status)) return `#/checked-out?id=${encodeURIComponent(rental.id)}`;
+  return `#/checkin?id=${encodeURIComponent(rental.id)}`;
+}
+
+function flashMarkup() {
+  const { notice, error } = state.flash;
+  return `
+    ${error ? `<div class="flash error">${esc(error)}</div>` : ''}
+    ${notice ? `<div class="flash notice">${esc(notice)}</div>` : ''}
+  `;
 }
 
 function appShell(content) {
@@ -216,14 +217,6 @@ function appShell(content) {
   `;
 }
 
-function flashMarkup() {
-  const { notice, error } = state.flash;
-  return `
-    ${error ? `<div class="flash error">${esc(error)}</div>` : ''}
-    ${notice ? `<div class="flash notice">${esc(notice)}</div>` : ''}
-  `;
-}
-
 function render() {
   const app = document.getElementById('app');
   if (!app) return;
@@ -237,9 +230,7 @@ function render() {
   else if (path === '/equipment') content = renderEquipmentPage();
   else content = renderOverviewPage();
   app.innerHTML = appShell(content);
-  document.getElementById('themeToggleBtn')?.addEventListener('click', () => {
-    toggleTheme();
-  });
+  document.getElementById('themeToggleBtn')?.addEventListener('click', () => toggleTheme());
   document.getElementById('logoutBtn')?.addEventListener('click', async () => {
     await signOut(auth);
     setFlash({ notice: 'Signed out.' });
@@ -312,6 +303,25 @@ function renderLogin() {
   });
 }
 
+function filterToolbar(prefix, filterOptions, sortOptions, filterLabel = 'Filter', sortLabel = 'Sort by') {
+  return `
+    <div class="toolbar-compact">
+      <label class="compact-control">
+        <span>${esc(filterLabel)}</span>
+        <select id="${prefix}Filter">
+          ${filterOptions.map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`).join('')}
+        </select>
+      </label>
+      <label class="compact-control">
+        <span>${esc(sortLabel)}</span>
+        <select id="${prefix}Sort">
+          ${sortOptions.map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`).join('')}
+        </select>
+      </label>
+    </div>
+  `;
+}
+
 function renderOverviewPage() {
   return `
     <section class="page-block">
@@ -326,51 +336,12 @@ function renderOverviewPage() {
     <section class="overview-grid">
       <div class="card">
         <div class="section-head"><h2>Upcoming bookings</h2><p class="muted">Booked but not yet checked out.</p></div>
-        <div class="action-row wrap">
-          <label class="grow">
-            <span class="small muted">Filter</span>
-            <select id="overviewBookingFilter">
-              <option value="all">All</option>
-              <option value="pickups_today">Pickups today</option>
-              <option value="returns_today">Returns today</option>
-              <option value="active">Active rentals</option>
-            </select>
-          </label>
-          <label class="grow">
-            <span class="small muted">Sort by</span>
-            <select id="overviewBookingSort">
-              <option value="out_asc">Out date</option>
-              <option value="in_asc">In date</option>
-              <option value="newest">Newest created</option>
-              <option value="oldest">Oldest created</option>
-            </select>
-          </label>
-        </div>
+        ${filterToolbar('overviewBooking', [['all','All'], ['pickups_today','Pickups today'], ['returns_today','Returns today'], ['active','Active rentals']], [['out_asc','Out date'], ['in_asc','In date'], ['newest','Newest created'], ['oldest','Oldest created']])}
         <div id="overviewBookings" class="stack-list"><div class="muted">Loading…</div></div>
       </div>
       <div class="card">
         <div class="section-head"><h2>Currently checked out</h2><p class="muted">Jobs that are out right now.</p></div>
-        <div class="action-row wrap">
-          <label class="grow">
-            <span class="small muted">Filter</span>
-            <select id="overviewCheckedFilter">
-              <option value="all">All checked out</option>
-              <option value="out_today">Checkout today</option>
-              <option value="in_today">Returns today</option>
-              <option value="overdue">Overdue</option>
-            </select>
-          </label>
-          <label class="grow">
-            <span class="small muted">Sort by</span>
-            <select id="overviewCheckedSort">
-              <option value="overdue_first">Overdue first</option>
-              <option value="in_asc">In date</option>
-              <option value="out_asc">Out date</option>
-              <option value="newest">Newest created</option>
-              <option value="oldest">Oldest created</option>
-            </select>
-          </label>
-        </div>
+        ${filterToolbar('overviewChecked', [['all','All checked out'], ['out_today','Checkout today'], ['in_today','Returns today'], ['overdue','Overdue']], [['overdue_first','Overdue first'], ['in_asc','In date'], ['out_asc','Out date'], ['newest','Newest created'], ['oldest','Oldest created']])}
         <div id="overviewCheckedOut" class="stack-list"><div class="muted">Loading…</div></div>
       </div>
     </section>
@@ -402,7 +373,7 @@ function renderBookingPage() {
               <h3>Available equipment</h3>
               <input id="bookingSearch" type="search" placeholder="Search equipment" />
             </div>
-            <div id="bookingAvailableList" class="list-scroll"><div class="muted">Loading…</div></div>
+            <div id="bookingAvailableList" class="list-scroll tall-scroll"><div class="muted">Loading…</div></div>
           </section>
 
           <section class="card list-card">
@@ -413,9 +384,9 @@ function renderBookingPage() {
             <div class="action-row wrap">
               <input id="customBookingItemName" class="grow" type="text" placeholder="Add custom item not in equipment list" />
               <input id="customBookingItemType" type="text" placeholder="Type" style="max-width: 180px;" />
-              <button id="addCustomBookingItemBtn" class="secondary" type="button">Add custom</button>
+              <button id="addCustomBookingItemBtn" class="secondary small-btn" type="button">Add custom</button>
             </div>
-            <div id="bookingSelectedList" class="list-scroll"><div class="muted">No equipment selected.</div></div>
+            <div id="bookingSelectedList" class="list-scroll tall-scroll"><div class="muted">No equipment selected.</div></div>
           </section>
         </div>
 
@@ -432,17 +403,18 @@ function renderCheckoutPage() {
     <section class="page-block">
       <div class="section-head">
         <h2>Checkout</h2>
-        <p class="muted">Create direct checkout or load a booking.</p>
+        <p class="muted">Open a booking to turn it into a checkout, or create a direct checkout.</p>
       </div>
 
       <div class="card compact-form">
         <div class="action-row wrap">
-          <label class="grow">
-            <span>Open booking or checkout</span>
-            <select id="checkoutRentalSelect"><option value="">Choose…</option></select>
-          </label>
           <button id="newDirectCheckoutBtn" class="secondary" type="button">Create direct checkout</button>
         </div>
+      </div>
+
+      <div class="card">
+        <div class="section-head"><h3>Booked entries</h3><p class="muted">Only bookings are shown here.</p></div>
+        <div id="checkoutBookingList" class="stack-list"><div class="muted">Loading…</div></div>
       </div>
 
       <div id="checkoutEditor" class="page-block"></div>
@@ -455,27 +427,7 @@ function renderCheckedOutPage() {
     <section class="page-block">
       <div class="section-head"><h2>Checked-out</h2><p class="muted">Open an active checkout to edit it.</p></div>
       <div class="card compact-form">
-        <div class="action-row wrap">
-          <label class="grow">
-            <span>Filter</span>
-            <select id="checkedOutFilter">
-              <option value="all">All checked out</option>
-              <option value="out_today">Checkout today</option>
-              <option value="in_today">Returns today</option>
-              <option value="overdue">Overdue</option>
-            </select>
-          </label>
-          <label class="grow">
-            <span>Sort by</span>
-            <select id="checkedOutSort">
-              <option value="overdue_first">Overdue first</option>
-              <option value="in_asc">In date</option>
-              <option value="out_asc">Out date</option>
-              <option value="newest">Newest created</option>
-              <option value="oldest">Oldest created</option>
-            </select>
-          </label>
-        </div>
+        ${filterToolbar('checkedOut', [['all','All checked out'], ['out_today','Checkout today'], ['in_today','Returns today'], ['overdue','Overdue']], [['overdue_first','Overdue first'], ['in_asc','In date'], ['out_asc','Out date'], ['newest','Newest created'], ['oldest','Oldest created']])}
       </div>
       <div id="checkedOutList" class="stack-list"><div class="muted">Loading…</div></div>
     </section>
@@ -489,16 +441,16 @@ function renderCheckinPage() {
         <h2>Check-in</h2>
         <p class="muted">Pick returned items into the Returned list.</p>
       </div>
-      <div class="card compact-form">
-        <label>
-          <span>Choose active checkout</span>
-          <select id="checkinRentalSelect"><option value="">Choose…</option></select>
-        </label>
+
+      <div class="card">
+        <div class="section-head"><h3>Active check-outs</h3><p class="muted">Open one to process a return.</p></div>
+        <div id="checkinActiveList" class="stack-list"><div class="muted">Loading…</div></div>
       </div>
+
       <div id="checkinEditor" class="page-block"></div>
 
       <div class="page-block">
-        <div class="section-head"><h3>History</h3><p class="muted">Completed and partially returned check-ins.</p></div>
+        <div class="section-head"><h3>History</h3><p class="muted">Completed and partial returns.</p></div>
         <div id="checkinHistoryList" class="stack-list"><div class="muted">Loading…</div></div>
       </div>
     </section>
@@ -635,12 +587,10 @@ async function deleteEquipmentItem(id) {
   await deleteDoc(ref);
 }
 async function updateEquipmentStatuses(itemIds, status) {
-  const uniqueIds = [...new Set(itemIds.filter(Boolean))];
-  if (!uniqueIds.length) return;
+  const ids = [...new Set(itemIds.filter(Boolean))];
+  if (!ids.length) return;
   const batch = writeBatch(db);
-  uniqueIds.forEach((id) => {
-    batch.update(doc(db, 'equipment', id), { status, updatedAt: serverTimestamp() });
-  });
+  ids.forEach((id) => batch.update(doc(db, 'equipment', id), { status, updatedAt: serverTimestamp() }));
   await batch.commit();
 }
 async function createRental(payload) {
@@ -656,21 +606,17 @@ async function deleteRental(id) {
 function bookingSummaryCard(rental, kind) {
   const items = readArray(rental.items);
   const hidden = Math.max(0, items.length - 3);
-  const deleteBtn = ``;
-  const actionBtn = kind === 'booked'
-    ? `<a class="secondary small-btn" href="#/checkout?id=${encodeURIComponent(rental.id)}">Open</a>`
-    : `<a class="secondary small-btn" href="#/checked-out?id=${encodeURIComponent(rental.id)}">Open</a>`;
   return `
-    <div class="card stack-item">
+    <a class="card stack-item clickable-card" href="${cardHrefForRental(rental)}">
       <div class="item-topline">
         <div>
           <strong>${esc(rental.renterName || rental.company || 'Untitled')}</strong>
           <div class="muted small">Out ${esc(fmtDate(rental.pickupDate))} • In ${esc(fmtDate(rental.returnDate))}</div>
         </div>
-        <div class="action-row">${actionBtn}${deleteBtn}</div>
+        <div class="pill-status">${esc(kind === 'booked' ? 'Booking' : 'Checked out')}</div>
       </div>
       <div class="muted small">${items.slice(0, 3).map((i) => esc(i.name || i.displayName || '')).join(', ')}${hidden ? ` +${hidden} more` : ''}</div>
-    </div>
+    </a>
   `;
 }
 
@@ -716,7 +662,6 @@ async function setupOverviewPage() {
     checkedSortEl?.addEventListener('change', renderLists);
 
     renderLists();
-    bindDeleteRentalButtons();
   } catch (e) {
     setFlash({ error: e.message || 'Failed to load overview.' });
     render();
@@ -732,9 +677,7 @@ async function setupEquipmentPage() {
 
   const renderGroups = () => {
     const q = (searchInput?.value || '').trim().toLowerCase();
-    const filtered = !q
-      ? groups
-      : groups.filter((group) => [group.name, group.type, group.manufacturer, group.model].filter(Boolean).some((v) => String(v).toLowerCase().includes(q)));
+    const filtered = !q ? groups : groups.filter((group) => [group.name, group.type, group.manufacturer, group.model].filter(Boolean).some((v) => String(v).toLowerCase().includes(q)));
     tbody.innerHTML = filtered.length ? filtered.map((group) => `
       <tr>
         <td>${esc(group.name)}</td>
@@ -835,9 +778,7 @@ async function setupEquipmentPage() {
     try {
       const text = await file.text();
       const rows = parseEquipmentXml(text);
-      for (const row of rows) {
-        await createEquipmentGroup(row);
-      }
+      for (const row of rows) await createEquipmentGroup(row);
       setFlash({ notice: `Imported ${rows.length} rows.` });
       render();
     } catch (e) {
@@ -860,9 +801,7 @@ function parseEquipmentXml(xmlText) {
   const docXml = parser.parseFromString(xmlText, 'application/xml');
   if (docXml.querySelector('parsererror')) throw new Error('Invalid XML file.');
   let entries = Array.from(docXml.querySelectorAll('item,equipment,product,asset,entry,record'));
-  if (!entries.length && docXml.documentElement) {
-    entries = Array.from(docXml.documentElement.children);
-  }
+  if (!entries.length && docXml.documentElement) entries = Array.from(docXml.documentElement.children);
   const getValue = (node, names) => {
     for (const name of names) {
       if (node.getAttribute?.(name)) return node.getAttribute(name);
@@ -884,7 +823,6 @@ function parseEquipmentXml(xmlText) {
 function rentalOptionLabel(rental) {
   return `${rental.renterName || rental.company || 'Untitled'} — Out ${fmtDate(rental.pickupDate)} • In ${fmtDate(rental.returnDate)} (${rental.status})`;
 }
-
 function normalizeItems(items) {
   return readArray(items).map((item) => ({
     equipmentId: item.equipmentId || null,
@@ -894,17 +832,14 @@ function normalizeItems(items) {
     returned: !!item.returned,
   }));
 }
-
 async function getUnavailableEquipmentIds(start, end, excludeRentalId = '') {
   if (!start || !end) return new Set();
   const rentals = await getUserRentals();
   const blocking = rentals.filter((r) => r.id !== excludeRentalId && ['booked', 'checked_out', 'partial_return'].includes(r.status) && overlaps(start, end, r.pickupDate, r.returnDate));
   const ids = new Set();
-  blocking.forEach((r) => {
-    normalizeItems(r.items).forEach((item) => {
-      if (item.equipmentId && !item.returned) ids.add(item.equipmentId);
-    });
-  });
+  blocking.forEach((r) => normalizeItems(r.items).forEach((item) => {
+    if (item.equipmentId && !item.returned) ids.add(item.equipmentId);
+  }));
   return ids;
 }
 
@@ -928,7 +863,10 @@ async function setupBookingPage() {
   const renderSelected = () => {
     selectedEl.innerHTML = selected.length ? selected.map((item, index) => `
       <div class="item-row">
-        <div><strong>${esc(item.name)}</strong><div class="muted small">${esc(item.type || '')}${item.equipmentId ? '' : ' • Custom item'}</div></div>
+        <div>
+          <strong>${esc(item.name)}</strong>
+          <div class="muted small">${esc(item.type || '')}${item.equipmentId ? '' : ' • Custom item'}</div>
+        </div>
         <button class="ghost small-btn" type="button" data-remove-index="${index}">Remove</button>
       </div>
     `).join('') : '<div class="muted">No equipment selected.</div>';
@@ -995,7 +933,6 @@ async function setupBookingPage() {
   searchInput.addEventListener('input', renderAvailable);
   pickupInput.addEventListener('change', refreshAvailability);
   returnInput.addEventListener('change', refreshAvailability);
-
   addCustomBtn?.addEventListener('click', () => {
     const name = (customNameInput?.value || '').trim();
     const type = (customTypeInput?.value || '').trim() || 'Custom';
@@ -1057,7 +994,7 @@ function renderCheckoutEditor(rental, allEquipment) {
     <div class="two-column-layout">
       <section class="card list-card">
         <div class="list-card-head"><h3>To pick</h3><div class="small muted">${todo.length} left</div></div>
-        <div id="checkoutTodoList" class="list-scroll">
+        <div id="checkoutTodoList" class="list-scroll tall-scroll">
           ${todo.length ? todo.map((item) => `
             <div class="item-row">
               <div><strong>${esc(item.name)}</strong><div class="muted small">${esc(item.type || '')}</div></div>
@@ -1068,7 +1005,7 @@ function renderCheckoutEditor(rental, allEquipment) {
 
       <section class="card list-card">
         <div class="list-card-head"><h3>Picked</h3><div class="small muted">${picked.length} picked</div></div>
-        <div id="checkoutPickedList" class="list-scroll">
+        <div id="checkoutPickedList" class="list-scroll tall-scroll">
           ${picked.length ? picked.map((item) => `
             <div class="item-row">
               <div><strong>${esc(item.name)}</strong><div class="muted small">${esc(item.type || '')}</div></div>
@@ -1099,15 +1036,16 @@ function renderCheckoutEditor(rental, allEquipment) {
 }
 
 async function setupCheckoutPage() {
-  const selectEl = document.getElementById('checkoutRentalSelect');
+  const listEl = document.getElementById('checkoutBookingList');
   const editorEl = document.getElementById('checkoutEditor');
-  if (!selectEl || !editorEl) return;
-  let rentals = [];
+  if (!listEl || !editorEl) return;
+
+  let bookings = [];
   let allEquipment = [];
   let currentRental = null;
 
   try {
-    rentals = (await getUserRentals()).filter((r) => ['booked', 'checked_out', 'partial_return'].includes(r.status));
+    bookings = (await getUserRentals()).filter((r) => r.status === 'booked');
     allEquipment = await getUserEquipment();
   } catch (e) {
     setFlash({ error: e.message || 'Failed to load checkout page.' });
@@ -1117,7 +1055,20 @@ async function setupCheckoutPage() {
 
   const params = getRouteParams();
   const requestedId = params.get('id') || '';
-  selectEl.innerHTML = `<option value="">Choose…</option>${rentals.map((r) => `<option value="${r.id}" ${r.id === requestedId ? 'selected' : ''}>${esc(rentalOptionLabel(r))}</option>`).join('')}`;
+
+  const renderBookingList = () => {
+    listEl.innerHTML = bookings.length ? bookings.map((r) => `
+      <a class="card stack-item clickable-card" href="#/checkout?id=${encodeURIComponent(r.id)}">
+        <div class="item-topline">
+          <div>
+            <strong>${esc(r.renterName || r.company || 'Untitled')}</strong>
+            <div class="muted small">Out ${esc(fmtDate(r.pickupDate))} • In ${esc(fmtDate(r.returnDate))}</div>
+          </div>
+          <div class="pill-status">Booking</div>
+        </div>
+      </a>
+    `).join('') : '<div class="muted">No booked entries available.</div>';
+  };
 
   async function openRental(rental) {
     currentRental = rental ? { ...rental, items: normalizeItems(rental.items) } : {
@@ -1223,23 +1174,14 @@ async function setupCheckoutPage() {
     });
   }
 
-  selectEl.addEventListener('change', async () => {
-    const id = selectEl.value;
-    if (!id) {
-      editorEl.innerHTML = '';
-      return;
-    }
-    const rental = rentals.find((r) => r.id === id);
-    await openRental(rental);
-  });
-
   document.getElementById('newDirectCheckoutBtn')?.addEventListener('click', async () => {
-    selectEl.value = '';
     await openRental(null);
   });
 
+  renderBookingList();
+
   if (requestedId) {
-    const rental = rentals.find((r) => r.id === requestedId);
+    const rental = bookings.find((r) => r.id === requestedId);
     if (rental) await openRental(rental);
   }
 }
@@ -1259,17 +1201,15 @@ async function setupCheckedOutPage() {
       );
 
       listEl.innerHTML = filtered.length ? filtered.map((r) => `
-        <div class="card stack-item">
+        <a class="card stack-item clickable-card" href="#/checked-out?id=${encodeURIComponent(r.id)}">
           <div class="item-topline">
             <div>
               <strong>${esc(r.renterName || r.company || 'Untitled')}</strong>
               <div class="muted small">Out ${esc(fmtDate(r.pickupDate))} • In ${esc(fmtDate(r.returnDate))}</div>
             </div>
-            <div class="action-row">
-              <a class="secondary small-btn" href="#/checkout?id=${encodeURIComponent(r.id)}">Edit</a>
-            </div>
+            <div class="pill-status">${esc(r.status === 'partial_return' ? 'Partial return' : 'Checked out')}</div>
           </div>
-        </div>
+        </a>
       `).join('') : '<div class="muted">No active checkouts match this view.</div>';
     };
 
@@ -1277,7 +1217,6 @@ async function setupCheckedOutPage() {
     sortEl?.addEventListener('change', renderList);
 
     renderList();
-    bindDeleteRentalButtons();
   } catch (e) {
     setFlash({ error: e.message || 'Failed to load checked-out page.' });
     render();
@@ -1288,20 +1227,22 @@ function renderCheckinEditor(rental) {
   const items = normalizeItems(rental.items);
   const stillOut = items.filter((item) => item.pickedUp && !item.returned);
   const returned = items.filter((item) => item.returned);
+  const isHistory = ['completed', 'partial_return'].includes(rental.status) && !['checked_out'].includes(rental.status);
   return `
     <div class="card compact-form">
       <div class="item-topline">
         <div>
           <strong>${esc(rental.renterName || rental.company || 'Untitled')}</strong>
-          <div class="muted small">Out ${esc(fmtDate(rental.pickupDate))} • In ${esc(fmtDate(rental.returnDate))}</div>
+          <div class="muted small">Out ${esc(fmtDate(rental.pickupDate))} • In ${esc(fmtDate(rental.returnDate))} • ${esc(rental.status)}</div>
         </div>
+        ${isHistory ? `<button id="deleteHistoryBtn" class="ghost danger small-btn" type="button">Delete entry</button>` : ''}
       </div>
     </div>
 
     <div class="two-column-layout">
       <section class="card list-card">
         <div class="list-card-head"><h3>Still out</h3><div class="small muted">${stillOut.length} left</div></div>
-        <div class="list-scroll">
+        <div class="list-scroll tall-scroll">
           ${stillOut.length ? stillOut.map((item) => `
             <div class="item-row">
               <div><strong>${esc(item.name)}</strong><div class="muted small">${esc(item.type || '')}</div></div>
@@ -1312,29 +1253,31 @@ function renderCheckinEditor(rental) {
 
       <section class="card list-card">
         <div class="list-card-head"><h3>Returned</h3><div class="small muted">${returned.length} returned</div></div>
-        <div class="list-scroll">
+        <div class="list-scroll tall-scroll">
           ${returned.length ? returned.map((item) => `
             <div class="item-row">
               <div><strong>${esc(item.name)}</strong><div class="muted small">${esc(item.type || '')}</div></div>
-              <button class="ghost small-btn" type="button" data-unreturn-index="${items.findIndex((row) => row === item)}">Move back</button>
+              ${rental.status === 'completed' ? '' : `<button class="ghost small-btn" type="button" data-unreturn-index="${items.findIndex((row) => row === item)}">Move back</button>`}
             </div>`).join('') : '<div class="muted">No returned items yet.</div>'}
         </div>
       </section>
     </div>
 
-    <div class="sticky-actions">
-      <button id="saveCheckinBtn" class="primary" type="button">Save check-in</button>
-    </div>
+    ${rental.status === 'completed' ? '' : `
+      <div class="sticky-actions">
+        <button id="saveCheckinBtn" class="primary" type="button">Save check-in</button>
+      </div>
+    `}
 
     <script type="application/json" id="checkinItemsData">${safeJson(items)}</script>
   `;
 }
 
 async function setupCheckinPage() {
-  const selectEl = document.getElementById('checkinRentalSelect');
+  const activeEl = document.getElementById('checkinActiveList');
   const editorEl = document.getElementById('checkinEditor');
   const historyEl = document.getElementById('checkinHistoryList');
-  if (!selectEl || !editorEl || !historyEl) return;
+  if (!activeEl || !editorEl || !historyEl) return;
 
   let rentals = [];
   try {
@@ -1346,18 +1289,32 @@ async function setupCheckinPage() {
   }
 
   const active = rentals.filter((r) => ['checked_out', 'partial_return'].includes(r.status));
-  const history = rentals.filter((r) => ['completed', 'partial_return'].includes(r.status)).sort((a, b) => dateOnly(b.returnDate).localeCompare(dateOnly(a.returnDate)));
-  selectEl.innerHTML = `<option value="">Choose…</option>${active.map((r) => `<option value="${r.id}">${esc(rentalOptionLabel(r))}</option>`).join('')}`;
+  const history = rentals
+    .filter((r) => ['completed', 'partial_return'].includes(r.status))
+    .sort((a, b) => dateOnly(b.returnDate).localeCompare(dateOnly(a.returnDate)));
+
+  activeEl.innerHTML = active.length ? active.map((r) => `
+    <a class="card stack-item clickable-card" href="#/checkin?id=${encodeURIComponent(r.id)}">
+      <div class="item-topline">
+        <div>
+          <strong>${esc(r.renterName || r.company || 'Untitled')}</strong>
+          <div class="muted small">Out ${esc(fmtDate(r.pickupDate))} • In ${esc(fmtDate(r.returnDate))}</div>
+        </div>
+        <div class="pill-status">${esc(r.status === 'partial_return' ? 'Partial return' : 'Active')}</div>
+      </div>
+    </a>
+  `).join('') : '<div class="muted">No active check-outs.</div>';
+
   historyEl.innerHTML = history.length ? history.map((r) => `
-    <div class="card stack-item">
+    <a class="card stack-item clickable-card" href="#/checkin?id=${encodeURIComponent(r.id)}">
       <div class="item-topline">
         <div>
           <strong>${esc(r.renterName || r.company || 'Untitled')}</strong>
           <div class="muted small">Out ${esc(fmtDate(r.pickupDate))} • In ${esc(fmtDate(r.returnDate))} • ${esc(r.status)}</div>
         </div>
-        <a class="secondary small-btn" href="#/checkin?id=${encodeURIComponent(r.id)}">Open</a>
+        <div class="pill-status">History</div>
       </div>
-    </div>
+    </a>
   `).join('') : '<div class="muted">No check-in history yet.</div>';
 
   const params = getRouteParams();
@@ -1375,8 +1332,8 @@ async function setupCheckinPage() {
   function bindCheckinEditor(rental) {
     const items = JSON.parse(document.getElementById('checkinItemsData')?.textContent || '[]');
 
-    function rerender(updatedItems) {
-      const updatedRental = { ...rental, items: updatedItems };
+    function rerender(updatedItems, statusOverride = rental.status) {
+      const updatedRental = { ...rental, items: updatedItems, status: statusOverride };
       editorEl.innerHTML = renderCheckinEditor(updatedRental);
       bindCheckinEditor(updatedRental);
     }
@@ -1398,55 +1355,46 @@ async function setupCheckinPage() {
 
     document.getElementById('saveCheckinBtn')?.addEventListener('click', async () => {
       const updatedItems = JSON.parse(document.getElementById('checkinItemsData')?.textContent || '[]');
-      const previousItems = normalizeItems(rental.items);
-
-      const newlyReturnedIds = updatedItems
-        .filter((item) => item.equipmentId && item.returned && !previousItems.some((prev) => prev.equipmentId === item.equipmentId && prev.returned))
-        .map((item) => item.equipmentId);
-
-      const movedBackOutIds = previousItems
-        .filter((prev) => prev.equipmentId && prev.returned && !updatedItems.some((item) => item.equipmentId === prev.equipmentId && item.returned))
-        .map((item) => item.equipmentId);
-
-      const pickedItems = updatedItems.filter((item) => item.pickedUp);
-      const pickedReturnedCount = pickedItems.filter((item) => item.returned).length;
-      const allReturned = pickedItems.length > 0 && pickedReturnedCount === pickedItems.length;
-      const anyReturned = pickedReturnedCount > 0;
-
+      const pickedItems = updatedItems.filter((i) => i.pickedUp);
+      const returnedIds = updatedItems.filter((i) => i.equipmentId && i.returned).map((i) => i.equipmentId);
+      const stillOutIds = updatedItems.filter((i) => i.equipmentId && i.pickedUp && !i.returned).map((i) => i.equipmentId);
+      const allReturned = pickedItems.length > 0 && pickedItems.every((i) => i.returned);
+      const nextStatus = allReturned ? 'completed' : (returnedIds.length ? 'partial_return' : 'checked_out');
       try {
-        if (newlyReturnedIds.length) await updateEquipmentStatuses(newlyReturnedIds, 'available');
-        if (movedBackOutIds.length) await updateEquipmentStatuses(movedBackOutIds, 'checked_out');
-
-        await updateRental(rental.id, {
-          items: updatedItems,
-          status: allReturned ? 'completed' : (anyReturned ? 'partial_return' : 'checked_out'),
-        });
-
-        setFlash({ notice: 'Check-in saved.' });
-        setRoute('/checkin');
+        if (returnedIds.length) await updateEquipmentStatuses(returnedIds, 'available');
+        if (stillOutIds.length) await updateEquipmentStatuses(stillOutIds, 'checked_out');
+        await updateRental(rental.id, { items: updatedItems, status: nextStatus });
+        if (allReturned) {
+          setFlash({ notice: `Check-in completed. ${returnedIds.length} item(s) returned.` });
+          setRoute('/checkin');
+        } else {
+          setFlash({ notice: `Check-in saved. ${returnedIds.length} item(s) returned.` });
+          setRoute('/checkin', { id: rental.id });
+        }
       } catch (e) {
         setFlash({ error: e.message || 'Failed to save check-in.' });
         render();
       }
     });
 
+    document.getElementById('deleteHistoryBtn')?.addEventListener('click', async () => {
+      if (!confirm('Delete this history entry?')) return;
+      try {
+        await deleteRental(rental.id);
+        setFlash({ notice: 'History entry deleted.' });
+        setRoute('/checkin');
+      } catch (e) {
+        setFlash({ error: e.message || 'Failed to delete history entry.' });
+        render();
+      }
+    });
   }
-
-  selectEl.addEventListener('change', () => {
-    const rental = active.find((r) => r.id === selectEl.value);
-    openRental(rental);
-  });
 
   if (requestedId) {
     const requested = rentals.find((r) => r.id === requestedId);
-    if (requested) {
-      selectEl.value = active.some((r) => r.id === requested.id) ? requested.id : '';
-      await openRental(requested);
-    }
+    if (requested) await openRental(requested);
   }
 }
-
-function bindDeleteRentalButtons() {}
 
 window.addEventListener('hashchange', () => {
   state.route = getRoute();

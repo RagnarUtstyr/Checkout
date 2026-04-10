@@ -1,3 +1,4 @@
+
 :root {
   --bg: #f5f7fb;
   --card: #ffffff;
@@ -156,15 +157,56 @@ button {
 }
 .login-card h1 { margin-top: 0; }
 
+.login-head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.login-head-row h1 { margin: 0; }
+
+.toolbar-compact {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+  flex-wrap: wrap;
+  margin: 10px 0 14px;
+}
+.compact-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
+  max-width: 220px;
+}
+.compact-control span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.compact-control select {
+  padding: 8px 10px;
+  border-radius: 9px;
+  font-size: 14px;
+}
+.clickable-card {
+  display: block;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+.clickable-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--primary) 30%, var(--line));
+}
+.pill-status {
+  font-size: 12px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--primary-soft) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  padding: 6px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
 @media (max-width: 980px) {
   .shell { grid-template-columns: 1fr; }
   .sidebar { flex-direction: row; flex-wrap: wrap; }
   .stats-row-4, .overview-grid, .two-column-layout, .form-grid { grid-template-columns: 1fr; }
   .form-grid .span-2 { grid-column: span 1; }
 }
-
-.login-head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.login-head-row h1 { margin: 0; }
 
 :root[data-theme='dark'] .flash.notice { background: #143a28; color: #b8f5cf; }
 :root[data-theme='dark'] .flash.error { background: #4b2230; color: #ffd1d8; }
@@ -180,29 +222,21 @@ button {
   color: #ffffff;
   background: var(--input-bg);
 }
-
 :root[data-theme='dark'] select:focus,
 :root[data-theme='dark'] input[list]:focus {
   color: #ffffff;
 }
-
 :root[data-theme='dark'] input,
-:root[data-theme='dark'] textarea,
-:root[data-theme='dark'] input:disabled,
-:root[data-theme='dark'] textarea:disabled,
-:root[data-theme='dark'] input[readonly],
-:root[data-theme='dark'] textarea[readonly] {
+:root[data-theme='dark'] textarea {
   color: #ffffff;
   -webkit-text-fill-color: #ffffff;
   caret-color: #ffffff;
 }
-
 :root[data-theme='dark'] input::placeholder,
 :root[data-theme='dark'] textarea::placeholder {
   color: #cbd5e1;
   -webkit-text-fill-color: #cbd5e1;
 }
-
 :root[data-theme='dark'] input[type='date'] {
   color-scheme: dark;
 }
