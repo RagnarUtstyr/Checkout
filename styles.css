@@ -185,3 +185,24 @@ button {
 :root[data-theme='dark'] input[list]:focus {
   color: #ffffff;
 }
+
+:root[data-theme='dark'] input,
+:root[data-theme='dark'] textarea,
+:root[data-theme='dark'] input:disabled,
+:root[data-theme='dark'] textarea:disabled,
+:root[data-theme='dark'] input[readonly],
+:root[data-theme='dark'] textarea[readonly] {
+  color: #ffffff;
+  -webkit-text-fill-color: #ffffff;
+  caret-color: #ffffff;
+}
+
+:root[data-theme='dark'] input::placeholder,
+:root[data-theme='dark'] textarea::placeholder {
+  color: #cbd5e1;
+  -webkit-text-fill-color: #cbd5e1;
+}
+
+:root[data-theme='dark'] input[type='date'] {
+  color-scheme: dark;
+}
