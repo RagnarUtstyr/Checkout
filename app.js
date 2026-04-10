@@ -430,6 +430,7 @@ function renderCheckedOutPage() {
         ${filterToolbar('checkedOut', [['all','All checked out'], ['out_today','Checkout today'], ['in_today','Returns today'], ['overdue','Overdue']], [['overdue_first','Overdue first'], ['in_asc','In date'], ['out_asc','Out date'], ['newest','Newest created'], ['oldest','Oldest created']])}
       </div>
       <div id="checkedOutList" class="stack-list"><div class="muted">Loading…</div></div>
+      <div id="checkedOutEditor" class="page-block"></div>
     </section>
   `;
 }
@@ -1058,7 +1059,7 @@ async function setupCheckoutPage() {
 
   const renderBookingList = () => {
     listEl.innerHTML = bookings.length ? bookings.map((r) => `
-      <a class="card stack-item clickable-card" href="#/checkout?id=${encodeURIComponent(r.id)}">
+      <button class="card stack-item clickable-card" type="button" data-open-checkout="${esc(r.id)}">
         <div class="item-topline">
           <div>
             <strong>${esc(r.renterName || r.company || 'Untitled')}</strong>
@@ -1066,8 +1067,16 @@ async function setupCheckoutPage() {
           </div>
           <div class="pill-status">Booking</div>
         </div>
-      </a>
+      </button>
     `).join('') : '<div class="muted">No booked entries available.</div>';
+    listEl.querySelectorAll('[data-open-checkout]').forEach((btn) => {
+      btn.onclick = async () => {
+        const rental = bookings.find((r) => r.id === btn.dataset.openCheckout);
+        if (!rental) return;
+        await openRental(rental);
+        setRoute('/checkout', { id: rental.id });
+      };
+    });
   };
 
   async function openRental(rental) {
@@ -1190,36 +1199,152 @@ async function setupCheckedOutPage() {
   const listEl = document.getElementById('checkedOutList');
   const filterEl = document.getElementById('checkedOutFilter');
   const sortEl = document.getElementById('checkedOutSort');
-  if (!listEl) return;
+  const editorEl = document.getElementById('checkedOutEditor');
+  if (!listEl || !editorEl) return;
+
+  let rentals = [];
+  let allEquipment = [];
+  let currentRental = null;
+
   try {
-    const rentals = (await getUserRentals()).filter((r) => ['checked_out', 'partial_return'].includes(r.status));
-
-    const renderList = () => {
-      const filtered = sortRentals(
-        rentals.filter((r) => rentalMatchesFilter(r, filterEl?.value || 'all')),
-        sortEl?.value || 'overdue_first',
-      );
-
-      listEl.innerHTML = filtered.length ? filtered.map((r) => `
-        <a class="card stack-item clickable-card" href="#/checked-out?id=${encodeURIComponent(r.id)}">
-          <div class="item-topline">
-            <div>
-              <strong>${esc(r.renterName || r.company || 'Untitled')}</strong>
-              <div class="muted small">Out ${esc(fmtDate(r.pickupDate))} • In ${esc(fmtDate(r.returnDate))}</div>
-            </div>
-            <div class="pill-status">${esc(r.status === 'partial_return' ? 'Partial return' : 'Checked out')}</div>
-          </div>
-        </a>
-      `).join('') : '<div class="muted">No active checkouts match this view.</div>';
-    };
-
-    filterEl?.addEventListener('change', renderList);
-    sortEl?.addEventListener('change', renderList);
-
-    renderList();
+    rentals = (await getUserRentals()).filter((r) => ['checked_out', 'partial_return'].includes(r.status));
+    allEquipment = await getUserEquipment();
   } catch (e) {
     setFlash({ error: e.message || 'Failed to load checked-out page.' });
     render();
+    return;
+  }
+
+  const params = getRouteParams();
+  const requestedId = params.get('id') || '';
+
+  const renderList = () => {
+    const filtered = sortRentals(
+      rentals.filter((r) => rentalMatchesFilter(r, filterEl?.value || 'all')),
+      sortEl?.value || 'overdue_first',
+    );
+
+    listEl.innerHTML = filtered.length ? filtered.map((r) => `
+      <button class="card stack-item clickable-card" type="button" data-open-checkedout="${esc(r.id)}">
+        <div class="item-topline">
+          <div>
+            <strong>${esc(r.renterName || r.company || 'Untitled')}</strong>
+            <div class="muted small">Out ${esc(fmtDate(r.pickupDate))} • In ${esc(fmtDate(r.returnDate))}</div>
+          </div>
+          <div class="pill-status">${esc(r.status === 'partial_return' ? 'Partial return' : 'Checked out')}</div>
+        </div>
+      </button>
+    `).join('') : '<div class="muted">No active checkouts match this view.</div>';
+
+    listEl.querySelectorAll('[data-open-checkedout]').forEach((btn) => {
+      btn.onclick = async () => {
+        const rental = rentals.find((r) => r.id === btn.dataset.openCheckedout);
+        if (!rental) return;
+        await openRental(rental);
+        setRoute('/checked-out', { id: rental.id });
+      };
+    });
+  };
+
+  async function openRental(rental) {
+    currentRental = rental ? { ...rental, items: normalizeItems(rental.items) } : null;
+    if (!currentRental) {
+      editorEl.innerHTML = '';
+      return;
+    }
+    editorEl.innerHTML = renderCheckoutEditor(currentRental, allEquipment);
+    bindCheckedOutEditor();
+  }
+
+  function bindCheckedOutEditor() {
+    const items = JSON.parse(document.getElementById('checkoutItemsData')?.textContent || '[]');
+
+    function rerenderWithItems(updatedItems) {
+      currentRental.items = updatedItems;
+      editorEl.innerHTML = renderCheckoutEditor(currentRental, allEquipment);
+      bindCheckedOutEditor();
+    }
+
+    document.querySelectorAll('[data-pick-index]').forEach((btn) => {
+      btn.onclick = () => {
+        const updated = [...items];
+        updated[Number(btn.dataset.pickIndex)].pickedUp = true;
+        rerenderWithItems(updated);
+      };
+    });
+
+    document.querySelectorAll('[data-unpick-index]').forEach((btn) => {
+      btn.onclick = () => {
+        const updated = [...items];
+        updated[Number(btn.dataset.unpickIndex)].pickedUp = false;
+        rerenderWithItems(updated);
+      };
+    });
+
+    const addSearch = document.getElementById('checkoutAddSearch');
+    const addList = document.getElementById('checkoutAddList');
+    const renderAddList = () => {
+      if (!addList) return;
+      const q = (addSearch?.value || '').trim().toLowerCase();
+      const currentIds = new Set(items.map((item) => item.equipmentId).filter(Boolean));
+      const options = allEquipment.filter((item) => {
+        const status = item.status || 'available';
+        const alreadySelected = currentIds.has(item.id);
+        if (alreadySelected) return false;
+        if (!['available', 'checked_out'].includes(status)) return false;
+        if (!q) return true;
+        return [item.displayName, item.name, item.type].filter(Boolean).some((v) => String(v).toLowerCase().includes(q));
+      });
+      addList.innerHTML = options.length ? options.slice(0, 80).map((item) => `
+        <div class="item-row">
+          <div><strong>${esc(item.displayName)}</strong><div class="muted small">${esc(item.type || '')}</div></div>
+          <button class="secondary small-btn" type="button" data-add-equipment="${item.id}">Add</button>
+        </div>`).join('') : '<div class="muted">No more available equipment to add.</div>';
+      addList.querySelectorAll('[data-add-equipment]').forEach((btn) => {
+        btn.onclick = () => {
+          const eq = allEquipment.find((row) => row.id === btn.dataset.addEquipment);
+          if (!eq) return;
+          rerenderWithItems([...items, { equipmentId: eq.id, name: eq.displayName, type: eq.type || 'General', pickedUp: true, returned: false }]);
+        };
+      });
+    };
+    addSearch?.addEventListener('input', renderAddList);
+    renderAddList();
+
+    document.getElementById('saveCheckoutBtn')?.addEventListener('click', async () => {
+      const payloadItems = JSON.parse(document.getElementById('checkoutItemsData')?.textContent || '[]');
+      const payload = {
+        renterName: document.getElementById('checkoutName')?.value || '',
+        company: document.getElementById('checkoutCompany')?.value || '',
+        pickupDate: document.getElementById('checkoutOut')?.value || todayLocal(),
+        returnDate: document.getElementById('checkoutIn')?.value || todayLocal(),
+        status: payloadItems.some((item) => !item.pickedUp) ? 'booked' : 'checked_out',
+        items: payloadItems,
+      };
+      try {
+        const before = normalizeItems((await getRentalById(currentRental.id))?.items);
+        const addedCheckedOut = payloadItems.filter((i) => i.pickedUp && i.equipmentId && !before.some((b) => b.equipmentId === i.equipmentId && b.pickedUp));
+        const released = before.filter((b) => b.equipmentId && b.pickedUp && !payloadItems.some((i) => i.equipmentId === b.equipmentId && i.pickedUp));
+        if (addedCheckedOut.length) await updateEquipmentStatuses(addedCheckedOut.map((i) => i.equipmentId), 'checked_out');
+        if (released.length) await updateEquipmentStatuses(released.map((i) => i.equipmentId), 'available');
+        await updateRental(currentRental.id, payload);
+        setFlash({ notice: 'Checkout updated.' });
+        setRoute('/checked-out', { id: currentRental.id });
+      } catch (e) {
+        setFlash({ error: e.message || 'Failed to save checkout.' });
+        render();
+      }
+    });
+  }
+
+  filterEl?.addEventListener('change', renderList);
+  sortEl?.addEventListener('change', renderList);
+
+  renderList();
+
+  if (requestedId) {
+    const rental = rentals.find((r) => r.id === requestedId);
+    if (rental) await openRental(rental);
   }
 }
 
@@ -1294,7 +1419,7 @@ async function setupCheckinPage() {
     .sort((a, b) => dateOnly(b.returnDate).localeCompare(dateOnly(a.returnDate)));
 
   activeEl.innerHTML = active.length ? active.map((r) => `
-    <a class="card stack-item clickable-card" href="#/checkin?id=${encodeURIComponent(r.id)}">
+    <button class="card stack-item clickable-card" type="button" data-open-checkin="${esc(r.id)}">
       <div class="item-topline">
         <div>
           <strong>${esc(r.renterName || r.company || 'Untitled')}</strong>
@@ -1302,11 +1427,11 @@ async function setupCheckinPage() {
         </div>
         <div class="pill-status">${esc(r.status === 'partial_return' ? 'Partial return' : 'Active')}</div>
       </div>
-    </a>
+    </button>
   `).join('') : '<div class="muted">No active check-outs.</div>';
 
   historyEl.innerHTML = history.length ? history.map((r) => `
-    <a class="card stack-item clickable-card" href="#/checkin?id=${encodeURIComponent(r.id)}">
+    <button class="card stack-item clickable-card" type="button" data-open-checkin="${esc(r.id)}">
       <div class="item-topline">
         <div>
           <strong>${esc(r.renterName || r.company || 'Untitled')}</strong>
@@ -1314,8 +1439,17 @@ async function setupCheckinPage() {
         </div>
         <div class="pill-status">History</div>
       </div>
-    </a>
+    </button>
   `).join('') : '<div class="muted">No check-in history yet.</div>';
+
+  document.querySelectorAll('[data-open-checkin]').forEach((btn) => {
+    btn.onclick = async () => {
+      const rental = rentals.find((r) => r.id === btn.dataset.openCheckin);
+      if (!rental) return;
+      await openRental(rental);
+      setRoute('/checkin', { id: rental.id });
+    };
+  });
 
   const params = getRouteParams();
   const requestedId = params.get('id') || '';
