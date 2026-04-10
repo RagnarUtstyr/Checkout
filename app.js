@@ -409,6 +409,11 @@ function renderBookingPage() {
               <h3>Selected for booking</h3>
               <div class="small muted">Scroll inside this section</div>
             </div>
+            <div class="action-row wrap">
+              <input id="customBookingItemName" class="grow" type="text" placeholder="Add custom item not in equipment list" />
+              <input id="customBookingItemType" type="text" placeholder="Type" style="max-width: 180px;" />
+              <button id="addCustomBookingItemBtn" class="secondary" type="button">Add custom</button>
+            </div>
             <div id="bookingSelectedList" class="list-scroll"><div class="muted">No equipment selected.</div></div>
           </section>
         </div>
@@ -908,6 +913,9 @@ async function setupBookingPage() {
   const pickupInput = document.getElementById('pickupDate');
   const returnInput = document.getElementById('returnDate');
   const noteEl = document.getElementById('bookingAvailabilityNote');
+  const customNameInput = document.getElementById('customBookingItemName');
+  const customTypeInput = document.getElementById('customBookingItemType');
+  const addCustomBtn = document.getElementById('addCustomBookingItemBtn');
   if (!bookingForm || !availableEl || !selectedEl || !searchInput || !pickupInput || !returnInput || !noteEl) return;
 
   let allEquipment = [];
@@ -917,7 +925,10 @@ async function setupBookingPage() {
   const renderSelected = () => {
     selectedEl.innerHTML = selected.length ? selected.map((item, index) => `
       <div class="item-row">
-        <div><strong>${esc(item.name)}</strong><div class="muted small">${esc(item.type || '')}</div></div>
+        <div>
+          <strong>${esc(item.name)}</strong>
+          <div class="muted small">${esc(item.type || '')}${item.equipmentId ? '' : ' • Custom item'}</div>
+        </div>
         <button class="ghost small-btn" type="button" data-remove-index="${index}">Remove</button>
       </div>
     `).join('') : '<div class="muted">No equipment selected.</div>';
@@ -984,6 +995,31 @@ async function setupBookingPage() {
   searchInput.addEventListener('input', renderAvailable);
   pickupInput.addEventListener('change', refreshAvailability);
   returnInput.addEventListener('change', refreshAvailability);
+
+  addCustomBtn?.addEventListener('click', () => {
+    const name = String(customNameInput?.value || '').trim();
+    const type = String(customTypeInput?.value || '').trim() || 'Custom';
+
+    if (!name) {
+      setFlash({ error: 'Enter a custom item name first.' });
+      render();
+      return;
+    }
+
+    selected.push({
+      equipmentId: null,
+      name,
+      type,
+      pickedUp: false,
+      returned: false,
+    });
+
+    if (customNameInput) customNameInput.value = '';
+    if (customTypeInput) customTypeInput.value = '';
+
+    renderSelected();
+    renderAvailable();
+  });
 
   bookingForm.onsubmit = async (event) => {
     event.preventDefault();
