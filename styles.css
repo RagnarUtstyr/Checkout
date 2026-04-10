@@ -128,8 +128,3 @@ hr.sep { border: 0; border-top: 1px solid rgba(255,255,255,.08); margin: 16px 0;
   .topbar { padding-inline: 14px; }
   .app-shell { padding-inline: 14px; }
 }
-
-
-.toolbar-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.toolbar-search{min-width:240px;flex:0 1 340px}
-.toolbar-search input{width:100%}
