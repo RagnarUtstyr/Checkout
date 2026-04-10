@@ -111,6 +111,62 @@ function fmtDate(value) {
   const date = new Date(`${iso}T12:00:00`);
   return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' }).format(date);
 }
+
+function timestampMs(value) {
+  if (!value) return 0;
+  if (typeof value === 'number') return value;
+  if (value?.seconds) return value.seconds * 1000;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+}
+function rentalMatchesFilter(rental, filter) {
+  const today = todayLocal();
+  const outDate = dateOnly(rental.pickupDate);
+  const inDate = dateOnly(rental.returnDate);
+  switch (filter) {
+    case 'pickups_today':
+    case 'out_today':
+      return outDate === today;
+    case 'returns_today':
+    case 'in_today':
+      return inDate === today;
+    case 'overdue':
+      return ['checked_out', 'partial_return'].includes(rental.status) && inDate && inDate < today;
+    case 'active':
+      return ['booked', 'checked_out', 'partial_return'].includes(rental.status);
+    default:
+      return true;
+  }
+}
+function sortRentals(rentals, sortBy) {
+  const today = todayLocal();
+  const list = [...rentals];
+  const cmpText = (a, b) => String(a.renterName || a.company || '').localeCompare(String(b.renterName || b.company || ''));
+  list.sort((a, b) => {
+    if (sortBy === 'out_asc') {
+      return dateOnly(a.pickupDate).localeCompare(dateOnly(b.pickupDate)) || cmpText(a, b);
+    }
+    if (sortBy === 'out_desc') {
+      return dateOnly(b.pickupDate).localeCompare(dateOnly(a.pickupDate)) || cmpText(a, b);
+    }
+    if (sortBy === 'in_desc') {
+      return dateOnly(b.returnDate).localeCompare(dateOnly(a.returnDate)) || cmpText(a, b);
+    }
+    if (sortBy === 'newest') {
+      return timestampMs(b.createdAt) - timestampMs(a.createdAt) || cmpText(a, b);
+    }
+    if (sortBy === 'oldest') {
+      return timestampMs(a.createdAt) - timestampMs(b.createdAt) || cmpText(a, b);
+    }
+    if (sortBy === 'overdue_first') {
+      const aOver = ['checked_out', 'partial_return'].includes(a.status) && dateOnly(a.returnDate) < today ? 0 : 1;
+      const bOver = ['checked_out', 'partial_return'].includes(b.status) && dateOnly(b.returnDate) < today ? 0 : 1;
+      return aOver - bOver || dateOnly(a.returnDate).localeCompare(dateOnly(b.returnDate)) || cmpText(a, b);
+    }
+    return dateOnly(a.returnDate).localeCompare(dateOnly(b.returnDate)) || cmpText(a, b);
+  });
+  return list;
+}
 function overlaps(aStart, aEnd, bStart, bEnd) {
   if (!aStart || !aEnd || !bStart || !bEnd) return false;
   return dateOnly(aStart) <= dateOnly(bEnd) && dateOnly(bStart) <= dateOnly(aEnd);
@@ -269,10 +325,51 @@ function renderOverviewPage() {
     <section class="overview-grid">
       <div class="card">
         <div class="section-head"><h2>Upcoming bookings</h2><p class="muted">Booked but not yet checked out.</p></div>
+        <div class="action-row wrap">
+          <label class="grow">
+            <span class="small muted">Filter</span>
+            <select id="overviewBookingFilter">
+              <option value="all">All</option>
+              <option value="pickups_today">Pickups today</option>
+              <option value="returns_today">Returns today</option>
+              <option value="active">Active rentals</option>
+            </select>
+          </label>
+          <label class="grow">
+            <span class="small muted">Sort by</span>
+            <select id="overviewBookingSort">
+              <option value="out_asc">Out date</option>
+              <option value="in_asc">In date</option>
+              <option value="newest">Newest created</option>
+              <option value="oldest">Oldest created</option>
+            </select>
+          </label>
+        </div>
         <div id="overviewBookings" class="stack-list"><div class="muted">Loading…</div></div>
       </div>
       <div class="card">
         <div class="section-head"><h2>Currently checked out</h2><p class="muted">Jobs that are out right now.</p></div>
+        <div class="action-row wrap">
+          <label class="grow">
+            <span class="small muted">Filter</span>
+            <select id="overviewCheckedFilter">
+              <option value="all">All checked out</option>
+              <option value="out_today">Checkout today</option>
+              <option value="in_today">Returns today</option>
+              <option value="overdue">Overdue</option>
+            </select>
+          </label>
+          <label class="grow">
+            <span class="small muted">Sort by</span>
+            <select id="overviewCheckedSort">
+              <option value="overdue_first">Overdue first</option>
+              <option value="in_asc">In date</option>
+              <option value="out_asc">Out date</option>
+              <option value="newest">Newest created</option>
+              <option value="oldest">Oldest created</option>
+            </select>
+          </label>
+        </div>
         <div id="overviewCheckedOut" class="stack-list"><div class="muted">Loading…</div></div>
       </div>
     </section>
@@ -351,6 +448,29 @@ function renderCheckedOutPage() {
   return `
     <section class="page-block">
       <div class="section-head"><h2>Checked-out</h2><p class="muted">Open an active checkout to edit it.</p></div>
+      <div class="card compact-form">
+        <div class="action-row wrap">
+          <label class="grow">
+            <span>Filter</span>
+            <select id="checkedOutFilter">
+              <option value="all">All checked out</option>
+              <option value="out_today">Checkout today</option>
+              <option value="in_today">Returns today</option>
+              <option value="overdue">Overdue</option>
+            </select>
+          </label>
+          <label class="grow">
+            <span>Sort by</span>
+            <select id="checkedOutSort">
+              <option value="overdue_first">Overdue first</option>
+              <option value="in_asc">In date</option>
+              <option value="out_asc">Out date</option>
+              <option value="newest">Newest created</option>
+              <option value="oldest">Oldest created</option>
+            </select>
+          </label>
+        </div>
+      </div>
       <div id="checkedOutList" class="stack-list"><div class="muted">Loading…</div></div>
     </section>
   `;
@@ -560,18 +680,34 @@ async function setupOverviewPage() {
 
     const bookingsEl = document.getElementById('overviewBookings');
     const checkedOutEl = document.getElementById('overviewCheckedOut');
-    if (bookingsEl) {
-      const booked = rentals
-        .filter((r) => r.status === 'booked')
-        .sort((a, b) => dateOnly(a.pickupDate).localeCompare(dateOnly(b.pickupDate)));
-      bookingsEl.innerHTML = booked.length ? booked.map((r) => bookingSummaryCard(r, 'booked')).join('') : '<div class="muted">No upcoming bookings.</div>';
-    }
-    if (checkedOutEl) {
-      const checked = rentals
-        .filter((r) => ['checked_out', 'partial_return'].includes(r.status))
-        .sort((a, b) => dateOnly(a.returnDate).localeCompare(dateOnly(b.returnDate)));
-      checkedOutEl.innerHTML = checked.length ? checked.map((r) => bookingSummaryCard(r, 'checked_out')).join('') : '<div class="muted">Nothing checked out.</div>';
-    }
+    const bookingFilterEl = document.getElementById('overviewBookingFilter');
+    const bookingSortEl = document.getElementById('overviewBookingSort');
+    const checkedFilterEl = document.getElementById('overviewCheckedFilter');
+    const checkedSortEl = document.getElementById('overviewCheckedSort');
+
+    const renderLists = () => {
+      if (bookingsEl) {
+        const booked = sortRentals(
+          rentals.filter((r) => r.status === 'booked' && rentalMatchesFilter(r, bookingFilterEl?.value || 'all')),
+          bookingSortEl?.value || 'out_asc',
+        );
+        bookingsEl.innerHTML = booked.length ? booked.map((r) => bookingSummaryCard(r, 'booked')).join('') : '<div class="muted">No upcoming bookings match this view.</div>';
+      }
+      if (checkedOutEl) {
+        const checked = sortRentals(
+          rentals.filter((r) => ['checked_out', 'partial_return'].includes(r.status) && rentalMatchesFilter(r, checkedFilterEl?.value || 'all')),
+          checkedSortEl?.value || 'overdue_first',
+        );
+        checkedOutEl.innerHTML = checked.length ? checked.map((r) => bookingSummaryCard(r, 'checked_out')).join('') : '<div class="muted">No checked-out jobs match this view.</div>';
+      }
+    };
+
+    bookingFilterEl?.addEventListener('change', renderLists);
+    bookingSortEl?.addEventListener('change', renderLists);
+    checkedFilterEl?.addEventListener('change', renderLists);
+    checkedSortEl?.addEventListener('change', renderLists);
+
+    renderLists();
     bindDeleteRentalButtons();
   } catch (e) {
     setFlash({ error: e.message || 'Failed to load overview.' });
@@ -1084,22 +1220,37 @@ async function setupCheckoutPage() {
 
 async function setupCheckedOutPage() {
   const listEl = document.getElementById('checkedOutList');
+  const filterEl = document.getElementById('checkedOutFilter');
+  const sortEl = document.getElementById('checkedOutSort');
   if (!listEl) return;
   try {
-    const rentals = (await getUserRentals()).filter((r) => ['checked_out', 'partial_return'].includes(r.status)).sort((a, b) => dateOnly(a.returnDate).localeCompare(dateOnly(b.returnDate)));
-    listEl.innerHTML = rentals.length ? rentals.map((r) => `
-      <div class="card stack-item">
-        <div class="item-topline">
-          <div>
-            <strong>${esc(r.renterName || r.company || 'Untitled')}</strong>
-            <div class="muted small">Out ${esc(fmtDate(r.pickupDate))} • In ${esc(fmtDate(r.returnDate))}</div>
-          </div>
-          <div class="action-row">
-            <a class="secondary small-btn" href="#/checkout?id=${encodeURIComponent(r.id)}">Edit</a>
+    const rentals = (await getUserRentals()).filter((r) => ['checked_out', 'partial_return'].includes(r.status));
+
+    const renderList = () => {
+      const filtered = sortRentals(
+        rentals.filter((r) => rentalMatchesFilter(r, filterEl?.value || 'all')),
+        sortEl?.value || 'overdue_first',
+      );
+
+      listEl.innerHTML = filtered.length ? filtered.map((r) => `
+        <div class="card stack-item">
+          <div class="item-topline">
+            <div>
+              <strong>${esc(r.renterName || r.company || 'Untitled')}</strong>
+              <div class="muted small">Out ${esc(fmtDate(r.pickupDate))} • In ${esc(fmtDate(r.returnDate))}</div>
+            </div>
+            <div class="action-row">
+              <a class="secondary small-btn" href="#/checkout?id=${encodeURIComponent(r.id)}">Edit</a>
+            </div>
           </div>
         </div>
-      </div>
-    `).join('') : '<div class="muted">No active checkouts.</div>';
+      `).join('') : '<div class="muted">No active checkouts match this view.</div>';
+    };
+
+    filterEl?.addEventListener('change', renderList);
+    sortEl?.addEventListener('change', renderList);
+
+    renderList();
     bindDeleteRentalButtons();
   } catch (e) {
     setFlash({ error: e.message || 'Failed to load checked-out page.' });
