@@ -128,7 +128,7 @@ function appShell(content) {
     <div class="topbar">
       <div class="brand">
         <h1>Equipment Tracker</h1>
-        <p>The free equipment tracker</p>
+        <p>Private to the signed-in user</p>
       </div>
       <div class="userbar">
         <span>${escapeHtml(state.user?.displayName || state.user?.email || '')}</span>
@@ -320,6 +320,10 @@ function renderEquipmentPage() {
         </div>
       </div>
       <div class="panel">
+        <div class="toolbar-row" style="margin-bottom:12px">
+          <div class="muted small">Search by name, type, manufacturer or model.</div>
+          <div class="toolbar-search"><input id="equipmentSearch" type="search" placeholder="Search equipment" autocomplete="off" /></div>
+        </div>
         <table class="table-like">
           <thead><tr><th>Name</th><th>Type</th><th>Total</th><th>Available</th><th></th></tr></thead>
           <tbody id="equipmentGroupTable"></tbody>
@@ -825,42 +829,79 @@ async function setupCheckinPage() {
 }
 
 async function setupEquipmentPage() {
-  async function load() {
-    const groups = await getEquipmentGroups();
-    const tbody = document.getElementById('equipmentGroupTable');
-    tbody.innerHTML = groups.length ? groups.map((group) => `
+  const tbody = document.getElementById('equipmentGroupTable');
+  const searchInput = document.getElementById('equipmentSearch');
+  if (!tbody) return;
+
+  let groups = [];
+
+  function renderGroups() {
+    const q = (searchInput?.value || '').trim().toLowerCase();
+    const filtered = !q ? groups : groups.filter((group) => (
+      [group.name, group.type, group.manufacturer, group.model]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q))
+    ));
+
+    tbody.innerHTML = filtered.length ? filtered.map((group) => `
       <tr>
         <td><strong>${escapeHtml(group.name)}</strong></td>
         <td>${escapeHtml(group.type)}</td>
         <td>${group.total}</td>
         <td>${group.available}</td>
         <td><button class="small ghost" data-open-group="${escapeHtml(group.key)}">Open</button></td>
-      </tr>`).join('') : '<tr><td colspan="5" class="muted">No equipment yet.</td></tr>';
-    document.querySelectorAll('[data-open-group]').forEach((btn) => btn.onclick = () => openEquipmentModal(groups.find((g) => g.key === btn.dataset.openGroup)));
+      </tr>`).join('') : '<tr><td colspan="5" class="muted">No equipment matches your search.</td></tr>';
+
+    document.querySelectorAll('[data-open-group]').forEach((btn) => {
+      btn.onclick = () => openEquipmentModal(groups.find((g) => g.key === btn.dataset.openGroup));
+    });
   }
-  document.getElementById('addEquipmentBtn').onclick = async () => {
-    try {
-      await createEquipmentGroup({
-        name: document.getElementById('eqName').value,
-        type: document.getElementById('eqType').value,
-        amount: document.getElementById('eqAmount').value,
-        manufacturer: document.getElementById('eqManufacturer').value,
-        model: document.getElementById('eqModel').value,
-        notes: document.getElementById('eqNotes').value,
-      });
-      setFlash({ notice: 'Equipment added.' }); render();
-    } catch (e) { setFlash({ error: e.message || 'Failed to add equipment.' }); render(); }
-  };
-  document.getElementById('importXmlBtn').onclick = async () => {
-    const file = document.getElementById('xmlFile').files?.[0];
-    if (!file) { setFlash({ error: 'Choose an XML file first.' }); return render(); }
-    try {
-      const text = await file.text();
-      const rows = parseEquipmentXml(text);
-      await importEquipmentRows(rows);
-      setFlash({ notice: `Imported ${rows.length} rows.` }); render();
-    } catch (e) { setFlash({ error: e.message || 'XML import failed.' }); render(); }
-  };
+
+  async function load() {
+    groups = await getEquipmentGroups();
+    renderGroups();
+  }
+
+  const addBtn = document.getElementById('addEquipmentBtn');
+  if (addBtn) {
+    addBtn.onclick = async () => {
+      try {
+        await createEquipmentGroup({
+          name: document.getElementById('eqName')?.value || '',
+          type: document.getElementById('eqType')?.value || '',
+          amount: document.getElementById('eqAmount')?.value || '1',
+          manufacturer: document.getElementById('eqManufacturer')?.value || '',
+          model: document.getElementById('eqModel')?.value || '',
+          notes: document.getElementById('eqNotes')?.value || '',
+        });
+        setFlash({ notice: 'Equipment added.' });
+        render();
+      } catch (e) {
+        setFlash({ error: e.message || 'Failed to add equipment.' });
+        render();
+      }
+    };
+  }
+
+  const importBtn = document.getElementById('importXmlBtn');
+  if (importBtn) {
+    importBtn.onclick = async () => {
+      const file = document.getElementById('xmlFile')?.files?.[0];
+      if (!file) { setFlash({ error: 'Choose an XML file first.' }); return render(); }
+      try {
+        const text = await file.text();
+        const rows = parseEquipmentXml(text);
+        await importEquipmentRows(rows);
+        setFlash({ notice: `Imported ${rows.length} rows.` });
+        render();
+      } catch (e) {
+        setFlash({ error: e.message || 'XML import failed.' });
+        render();
+      }
+    };
+  }
+
+  if (searchInput) searchInput.addEventListener('input', renderGroups);
   await load();
 }
 
