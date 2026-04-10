@@ -1,3 +1,4 @@
+
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js';
 import {
   getAuth,
@@ -634,8 +635,10 @@ async function deleteEquipmentItem(id) {
   await deleteDoc(ref);
 }
 async function updateEquipmentStatuses(itemIds, status) {
+  const uniqueIds = [...new Set(itemIds.filter(Boolean))];
+  if (!uniqueIds.length) return;
   const batch = writeBatch(db);
-  itemIds.filter(Boolean).forEach((id) => {
+  uniqueIds.forEach((id) => {
     batch.update(doc(db, 'equipment', id), { status, updatedAt: serverTimestamp() });
   });
   await batch.commit();
@@ -925,10 +928,7 @@ async function setupBookingPage() {
   const renderSelected = () => {
     selectedEl.innerHTML = selected.length ? selected.map((item, index) => `
       <div class="item-row">
-        <div>
-          <strong>${esc(item.name)}</strong>
-          <div class="muted small">${esc(item.type || '')}${item.equipmentId ? '' : ' • Custom item'}</div>
-        </div>
+        <div><strong>${esc(item.name)}</strong><div class="muted small">${esc(item.type || '')}${item.equipmentId ? '' : ' • Custom item'}</div></div>
         <button class="ghost small-btn" type="button" data-remove-index="${index}">Remove</button>
       </div>
     `).join('') : '<div class="muted">No equipment selected.</div>';
@@ -997,26 +997,16 @@ async function setupBookingPage() {
   returnInput.addEventListener('change', refreshAvailability);
 
   addCustomBtn?.addEventListener('click', () => {
-    const name = String(customNameInput?.value || '').trim();
-    const type = String(customTypeInput?.value || '').trim() || 'Custom';
-
+    const name = (customNameInput?.value || '').trim();
+    const type = (customTypeInput?.value || '').trim() || 'Custom';
     if (!name) {
       setFlash({ error: 'Enter a custom item name first.' });
       render();
       return;
     }
-
-    selected.push({
-      equipmentId: null,
-      name,
-      type,
-      pickedUp: false,
-      returned: false,
-    });
-
+    selected.push({ equipmentId: null, name, type, pickedUp: false, returned: false });
     if (customNameInput) customNameInput.value = '';
     if (customTypeInput) customTypeInput.value = '';
-
     renderSelected();
     renderAvailable();
   });
@@ -1068,7 +1058,7 @@ function renderCheckoutEditor(rental, allEquipment) {
       <section class="card list-card">
         <div class="list-card-head"><h3>To pick</h3><div class="small muted">${todo.length} left</div></div>
         <div id="checkoutTodoList" class="list-scroll">
-          ${todo.length ? todo.map((item, index) => `
+          ${todo.length ? todo.map((item) => `
             <div class="item-row">
               <div><strong>${esc(item.name)}</strong><div class="muted small">${esc(item.type || '')}</div></div>
               <button class="secondary small-btn" type="button" data-pick-index="${items.findIndex((row) => row === item)}">Pick</button>
@@ -1408,14 +1398,30 @@ async function setupCheckinPage() {
 
     document.getElementById('saveCheckinBtn')?.addEventListener('click', async () => {
       const updatedItems = JSON.parse(document.getElementById('checkinItemsData')?.textContent || '[]');
-      const allReturned = updatedItems.filter((i) => i.pickedUp).every((i) => i.returned);
-      const returnedIds = updatedItems.filter((i) => i.equipmentId && i.returned).map((i) => i.equipmentId);
+      const previousItems = normalizeItems(rental.items);
+
+      const newlyReturnedIds = updatedItems
+        .filter((item) => item.equipmentId && item.returned && !previousItems.some((prev) => prev.equipmentId === item.equipmentId && prev.returned))
+        .map((item) => item.equipmentId);
+
+      const movedBackOutIds = previousItems
+        .filter((prev) => prev.equipmentId && prev.returned && !updatedItems.some((item) => item.equipmentId === prev.equipmentId && item.returned))
+        .map((item) => item.equipmentId);
+
+      const pickedItems = updatedItems.filter((item) => item.pickedUp);
+      const pickedReturnedCount = pickedItems.filter((item) => item.returned).length;
+      const allReturned = pickedItems.length > 0 && pickedReturnedCount === pickedItems.length;
+      const anyReturned = pickedReturnedCount > 0;
+
       try {
-        if (returnedIds.length) await updateEquipmentStatuses(returnedIds, 'available');
+        if (newlyReturnedIds.length) await updateEquipmentStatuses(newlyReturnedIds, 'available');
+        if (movedBackOutIds.length) await updateEquipmentStatuses(movedBackOutIds, 'checked_out');
+
         await updateRental(rental.id, {
           items: updatedItems,
-          status: allReturned ? 'completed' : 'partial_return',
+          status: allReturned ? 'completed' : (anyReturned ? 'partial_return' : 'checked_out'),
         });
+
         setFlash({ notice: 'Check-in saved.' });
         setRoute('/checkin');
       } catch (e) {
