@@ -44,7 +44,23 @@ const state = {
   route: getRoute(),
   flash: { notice: '', error: '' },
   modalGroupKey: '',
+  theme: getSavedTheme(),
 };
+
+function getSavedTheme() {
+  const saved = localStorage.getItem('equipmentTrackerTheme');
+  return saved === 'dark' ? 'dark' : 'light';
+}
+function applyTheme(theme) {
+  state.theme = theme === 'dark' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', state.theme);
+  localStorage.setItem('equipmentTrackerTheme', state.theme);
+}
+function toggleTheme() {
+  applyTheme(state.theme === 'dark' ? 'light' : 'dark');
+  if (state.user) render();
+}
+applyTheme(state.theme);
 
 function getRoute() {
   return (location.hash || '#/').replace(/^#/, '');
@@ -128,6 +144,7 @@ function appShell(content) {
     <div class="topbar">
       <div class="brand">Equipment Tracker</div>
       <div class="topbar-right">
+        <button id="themeToggleBtn" class="ghost small-btn" type="button">${state.theme === 'dark' ? 'Light mode' : 'Dark mode'}</button>
         <div class="signed-in">${esc(state.user?.displayName || state.user?.email || '')}</div>
         <button id="logoutBtn" class="ghost small-btn" type="button">Log out</button>
       </div>
@@ -163,6 +180,9 @@ function render() {
   else if (path === '/equipment') content = renderEquipmentPage();
   else content = renderOverviewPage();
   app.innerHTML = appShell(content);
+  document.getElementById('themeToggleBtn')?.addEventListener('click', () => {
+    toggleTheme();
+  });
   document.getElementById('logoutBtn')?.addEventListener('click', async () => {
     await signOut(auth);
     setFlash({ notice: 'Signed out.' });
@@ -177,7 +197,10 @@ function renderLogin() {
     <div class="login-shell">
       ${flashMarkup()}
       <div class="login-card">
-        <h1>Rental equipment tracker</h1>
+        <div class="login-head-row">
+          <h1>Rental equipment tracker</h1>
+          <button id="loginThemeToggleBtn" class="ghost small-btn" type="button">${state.theme === 'dark' ? 'Light mode' : 'Dark mode'}</button>
+        </div>
         <p class="muted">Sign in with Google or email/password.</p>
         <button id="googleLoginBtn" class="primary wide" type="button">Continue with Google</button>
         <form id="emailAuthForm" class="stack-form">
@@ -191,6 +214,10 @@ function renderLogin() {
       </div>
     </div>
   `;
+  document.getElementById('loginThemeToggleBtn')?.addEventListener('click', () => {
+    toggleTheme();
+    renderLogin();
+  });
   document.getElementById('googleLoginBtn')?.addEventListener('click', async () => {
     try {
       setFlash();
