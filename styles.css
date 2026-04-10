@@ -172,3 +172,16 @@ button {
 :root[data-theme='dark'] .signed-in { color: var(--muted); }
 :root[data-theme='dark'] .inventory-table th,
 :root[data-theme='dark'] .inventory-table td { border-bottom-color: color-mix(in srgb, var(--line) 65%, transparent); }
+
+:root[data-theme='dark'] select,
+:root[data-theme='dark'] option,
+:root[data-theme='dark'] optgroup,
+:root[data-theme='dark'] input[list] {
+  color: #ffffff;
+  background: var(--input-bg);
+}
+
+:root[data-theme='dark'] select:focus,
+:root[data-theme='dark'] input[list]:focus {
+  color: #ffffff;
+}
