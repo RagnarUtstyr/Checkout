@@ -43,24 +43,8 @@ const state = {
   user: null,
   route: getRoute(),
   flash: { notice: '', error: '' },
-  modalGroupKey: '',
-  theme: getSavedTheme(),
+  equipmentModalKey: '',
 };
-
-function getSavedTheme() {
-  const saved = localStorage.getItem('equipmentTrackerTheme');
-  return saved === 'dark' ? 'dark' : 'light';
-}
-function applyTheme(theme) {
-  state.theme = theme === 'dark' ? 'dark' : 'light';
-  document.documentElement.setAttribute('data-theme', state.theme);
-  localStorage.setItem('equipmentTrackerTheme', state.theme);
-}
-function toggleTheme() {
-  applyTheme(state.theme === 'dark' ? 'light' : 'dark');
-  if (state.user) render();
-}
-applyTheme(state.theme);
 
 function getRoute() {
   return (location.hash || '#/').replace(/^#/, '');
@@ -69,7 +53,7 @@ function currentPath() {
   return state.route.split('?')[0] || '/';
 }
 function getRouteParams() {
-  return new URLSearchParams(state.route.split('?')[1] || '');
+  return new URLSearchParams((state.route.split('?')[1] || ''));
 }
 function setRoute(path, params = null) {
   const query = params ? `?${new URLSearchParams(params).toString()}` : '';
@@ -78,57 +62,57 @@ function setRoute(path, params = null) {
 function setFlash({ notice = '', error = '' } = {}) {
   state.flash = { notice, error };
 }
-function uid() {
-  const id = auth.currentUser?.uid;
-  if (!id) throw new Error('You must be signed in.');
-  return id;
-}
-function esc(value = '') {
-  return String(value)
+function escapeHtml(v = '') {
+  return String(v)
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
 }
+function slugify(v) {
+  return String(v || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+function unitDisplayName(name, unitNumber) {
+  return `${name} #${unitNumber}`;
+}
+function fmtDate(value) {
+  if (!value) return '—';
+  const date = value?.seconds ? new Date(value.seconds * 1000) : new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' }).format(date);
+}
 function dateOnly(value) {
   if (!value) return '';
   if (typeof value === 'string') return value.slice(0, 10);
   if (value?.seconds) {
     const d = new Date(value.seconds * 1000);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
   }
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 function todayLocal() {
-  return dateOnly(new Date());
-}
-function fmtDate(value) {
-  const iso = dateOnly(value);
-  if (!iso) return '—';
-  const date = new Date(`${iso}T12:00:00`);
-  return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' }).format(date);
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 function overlaps(aStart, aEnd, bStart, bEnd) {
   if (!aStart || !aEnd || !bStart || !bEnd) return false;
   return dateOnly(aStart) <= dateOnly(bEnd) && dateOnly(bStart) <= dateOnly(aEnd);
 }
-function groupKeyFor(name, type) {
-  return `${String(type || 'General').trim()}::${String(name || '').trim()}`.toLowerCase();
-}
-function unitDisplayName(name, unitNumber) {
-  return `${name} #${unitNumber}`;
-}
-function safeJson(value) {
-  return JSON.stringify(value).replace(/</g, '\\u003c');
-}
-function readArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-function sortByName(items) {
-  return [...items].sort((a, b) => String(a.displayName || a.name || '').localeCompare(String(b.displayName || b.name || '')));
+function uid() {
+  const id = auth.currentUser?.uid;
+  if (!id) throw new Error('You must be signed in.');
+  return id;
 }
 
 function appShell(content) {
@@ -142,47 +126,41 @@ function appShell(content) {
   ];
   return `
     <div class="topbar">
-      <div class="brand">Equipment Tracker</div>
-      <div class="topbar-right">
-        <button id="themeToggleBtn" class="ghost small-btn" type="button">${state.theme === 'dark' ? 'Light mode' : 'Dark mode'}</button>
-        <div class="signed-in">${esc(state.user?.displayName || state.user?.email || '')}</div>
-        <button id="logoutBtn" class="ghost small-btn" type="button">Log out</button>
+      <div class="brand">
+        <h1>Equipment Tracker</h1>
+        <p>Private to the signed-in user</p>
+      </div>
+      <div class="userbar">
+        <span>${escapeHtml(state.user?.displayName || state.user?.email || '')}</span>
+        <button class="small ghost" id="logoutBtn">Log out</button>
       </div>
     </div>
-    ${flashMarkup()}
-    <div class="shell">
-      <aside class="sidebar">
-        ${nav.map(([href, label]) => `<a class="nav-link ${currentPath() === href ? 'active' : ''}" href="#${href}">${esc(label)}</a>`).join('')}
-      </aside>
-      <main class="main-content">${content}</main>
+    <div class="app-shell">
+      ${flashMarkup()}
+      <div class="layout">
+        <aside class="sidebar">
+          ${nav.map(([href, label]) => `<a class="nav-link ${currentPath() === href ? 'active' : ''}" href="#${href}">${label}</a>`).join('')}
+        </aside>
+        <main class="main-panel">${content}</main>
+      </div>
     </div>
   `;
 }
-
 function flashMarkup() {
   const { notice, error } = state.flash;
-  return `
-    ${error ? `<div class="flash error">${esc(error)}</div>` : ''}
-    ${notice ? `<div class="flash notice">${esc(notice)}</div>` : ''}
-  `;
+  return `${error ? `<div class="flash error">${escapeHtml(error)}</div>` : ''}${notice ? `<div class="flash notice">${escapeHtml(notice)}</div>` : ''}`;
 }
-
 function render() {
-  const app = document.getElementById('app');
-  if (!app) return;
   if (!state.user) return renderLogin();
-  let content = '';
   const path = currentPath();
+  let content = '';
   if (path === '/booking') content = renderBookingPage();
   else if (path === '/checkout') content = renderCheckoutPage();
   else if (path === '/checked-out') content = renderCheckedOutPage();
   else if (path === '/checkin') content = renderCheckinPage();
   else if (path === '/equipment') content = renderEquipmentPage();
   else content = renderOverviewPage();
-  app.innerHTML = appShell(content);
-  document.getElementById('themeToggleBtn')?.addEventListener('click', () => {
-    toggleTheme();
-  });
+  document.getElementById('app').innerHTML = appShell(content);
   document.getElementById('logoutBtn')?.addEventListener('click', async () => {
     await signOut(auth);
     setFlash({ notice: 'Signed out.' });
@@ -191,1111 +169,728 @@ function render() {
 }
 
 function renderLogin() {
-  const app = document.getElementById('app');
-  if (!app) return;
-  app.innerHTML = `
-    <div class="login-shell">
+  document.getElementById('app').innerHTML = `
+    <div class="login-wrap">
       ${flashMarkup()}
-      <div class="login-card">
-        <div class="login-head-row">
-          <h1>Rental equipment tracker</h1>
-          <button id="loginThemeToggleBtn" class="ghost small-btn" type="button">${state.theme === 'dark' ? 'Light mode' : 'Dark mode'}</button>
+      <div class="card login-card">
+        <div class="muted small">Rental equipment tracker</div>
+        <h1 style="margin-top:8px">Sign in</h1>
+        <p class="muted">Use Google or email/password.</p>
+        <div class="grid">
+          <button id="googleLoginBtn">Continue with Google</button>
+          <form id="emailAuthForm" class="grid">
+            <div>
+              <label>Email</label>
+              <input name="email" type="email" required />
+            </div>
+            <div>
+              <label>Password</label>
+              <input name="password" type="password" required />
+            </div>
+            <div class="row">
+              <button type="submit">Log in</button>
+              <button type="button" class="ghost" id="registerBtn">Create account</button>
+            </div>
+          </form>
         </div>
-        <p class="muted">Sign in with Google or email/password.</p>
-        <button id="googleLoginBtn" class="primary wide" type="button">Continue with Google</button>
-        <form id="emailAuthForm" class="stack-form">
-          <label><span>Email</span><input name="email" type="email" required /></label>
-          <label><span>Password</span><input name="password" type="password" required /></label>
-          <div class="action-row">
-            <button class="primary" type="submit">Log in</button>
-            <button id="registerBtn" class="secondary" type="button">Create account</button>
-          </div>
-        </form>
       </div>
     </div>
   `;
-  document.getElementById('loginThemeToggleBtn')?.addEventListener('click', () => {
-    toggleTheme();
-    renderLogin();
-  });
-  document.getElementById('googleLoginBtn')?.addEventListener('click', async () => {
-    try {
-      setFlash();
-      await signInWithPopup(auth, googleProvider);
-    } catch (e) {
-      setFlash({ error: e.message || 'Google sign-in failed.' });
-      renderLogin();
-    }
-  });
-  const emailAuthForm = document.getElementById('emailAuthForm');
-  if (emailAuthForm) {
-    emailAuthForm.onsubmit = async (event) => {
-      event.preventDefault();
-      const form = new FormData(event.currentTarget);
-      try {
-        setFlash();
-        await signInWithEmailAndPassword(auth, form.get('email'), form.get('password'));
-      } catch (e) {
-        setFlash({ error: e.message || 'Email sign-in failed.' });
-        renderLogin();
-      }
-    };
-  }
-  document.getElementById('registerBtn')?.addEventListener('click', async () => {
-    const formEl = document.getElementById('emailAuthForm');
-    if (!formEl) return;
-    const form = new FormData(formEl);
-    try {
-      setFlash();
-      await createUserWithEmailAndPassword(auth, form.get('email'), form.get('password'));
-    } catch (e) {
-      setFlash({ error: e.message || 'Registration failed.' });
-      renderLogin();
-    }
-  });
+  document.getElementById('googleLoginBtn').onclick = async () => {
+    try { setFlash(); await signInWithPopup(auth, googleProvider); } catch (e) { setFlash({ error: e.message || 'Google sign-in failed.' }); renderLogin(); }
+  };
+  document.getElementById('emailAuthForm').onsubmit = async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    try { setFlash(); await signInWithEmailAndPassword(auth, form.get('email'), form.get('password')); } catch (e) { setFlash({ error: e.message || 'Email sign-in failed.' }); renderLogin(); }
+  };
+  document.getElementById('registerBtn').onclick = async () => {
+    const form = new FormData(document.getElementById('emailAuthForm'));
+    try { setFlash(); await createUserWithEmailAndPassword(auth, form.get('email'), form.get('password')); } catch (e) { setFlash({ error: e.message || 'Registration failed.' }); renderLogin(); }
+  };
 }
 
 function renderOverviewPage() {
   return `
-    <section class="page-block">
-      <div class="stats-row stats-row-4" id="overviewStats">
-        ${['Active rentals', 'Pickups today', 'Returns today', 'Overdue'].map((label, i) => `
-          <div class="stat-card">
-            <div class="stat-label">${esc(label)}</div>
-            <div class="stat-value" id="stat${i}">—</div>
-          </div>`).join('')}
-      </div>
-    </section>
-    <section class="overview-grid">
-      <div class="card">
-        <div class="section-head"><h2>Upcoming bookings</h2><p class="muted">Booked but not yet checked out.</p></div>
-        <div id="overviewBookings" class="stack-list"><div class="muted">Loading…</div></div>
-      </div>
-      <div class="card">
-        <div class="section-head"><h2>Currently checked out</h2><p class="muted">Jobs that are out right now.</p></div>
-        <div id="overviewCheckedOut" class="stack-list"><div class="muted">Loading…</div></div>
-      </div>
-    </section>
+    <div class="stats">
+      <div class="card stat"><h3>Active rentals</h3><div class="value" id="statActive">—</div></div>
+      <div class="card stat"><h3>Pickups today</h3><div class="value" id="statPickupsToday">—</div></div>
+      <div class="card stat"><h3>Returns today</h3><div class="value" id="statReturnsToday">—</div></div>
+      <div class="card stat"><h3>Overdue</h3><div class="value" id="statOverdue">—</div></div>
+    </div>
+    <div class="section-head">
+      <div><h2>Upcoming bookings</h2><div class="muted small">Booked but not yet checked out.</div></div>
+      <div><h2>Currently checked out</h2><div class="muted small">Jobs that are out right now.</div></div>
+    </div>
+    <div class="columns">
+      <div class="list" id="overviewBooked"></div>
+      <div class="list" id="overviewOut"></div>
+    </div>
   `;
 }
-
 function renderBookingPage() {
   return `
-    <section class="page-block">
-      <div class="section-head">
-        <h2>Create booking</h2>
-        <p class="muted">Items disappear from search once added.</p>
-      </div>
-      <form id="bookingForm" class="stack-form">
-        <div class="form-grid">
-          <label><span>Name</span><input name="renterName" required /></label>
-          <label><span>Company</span><input name="company" /></label>
-          <label><span>Email</span><input name="email" type="email" /></label>
-          <label><span>Phone</span><input name="phone" /></label>
-          <label><span>Pickup date</span><input id="pickupDate" name="pickupDate" type="date" required /></label>
-          <label><span>Return date</span><input id="returnDate" name="returnDate" type="date" required /></label>
-          <label class="span-2"><span>Notes</span><textarea name="notes" rows="3"></textarea></label>
+    <div class="panel">
+      <div class="spread"><div><h2 style="margin:0">Create booking</h2><div class="muted small">Items disappear from search once added.</div></div></div>
+      <hr class="sep" />
+      <form id="bookingForm" class="grid">
+        <div class="forms">
+          <div><label>Name</label><input name="renterName" required /></div>
+          <div><label>Company</label><input name="company" /></div>
+          <div><label>Email</label><input name="email" type="email" /></div>
+          <div><label>Phone</label><input name="phone" /></div>
+          <div><label>Pickup date</label><input name="pickupDate" id="pickupDate" type="date" required /></div>
+          <div><label>Return date</label><input name="returnDate" id="returnDate" type="date" required /></div>
+          <div class="full"><label>Notes</label><textarea name="notes"></textarea></div>
         </div>
-        <div id="bookingAvailabilityNote" class="helper-text">Choose dates to check availability.</div>
-
-        <div class="two-column-layout">
-          <section class="card list-card">
-            <div class="list-card-head">
-              <h3>Available equipment</h3>
-              <input id="bookingSearch" type="search" placeholder="Search equipment" />
-            </div>
-            <div id="bookingAvailableList" class="list-scroll"><div class="muted">Loading…</div></div>
-          </section>
-
-          <section class="card list-card">
-            <div class="list-card-head">
-              <h3>Selected for booking</h3>
-              <div class="small muted">Scroll inside this section</div>
-            </div>
-            <div id="bookingSelectedList" class="list-scroll"><div class="muted">No equipment selected.</div></div>
-          </section>
+        <div class="card">
+          <div class="spread"><strong>Equipment</strong><span class="muted small" id="availabilityNote">Choose dates to check availability.</span></div>
+          <div class="grid" style="margin-top:10px">
+            <input id="bookingSearch" placeholder="Search equipment" />
+            <div class="search-results" id="bookingSearchResults"></div>
+          </div>
         </div>
-
-        <div class="sticky-actions">
-          <button class="primary" type="submit">Save booking</button>
+        <div class="card">
+          <strong>Selected for booking</strong>
+          <div class="selected-list" id="bookingSelectedList" style="margin-top:10px"></div>
         </div>
+        <div class="row"><button type="submit">Save booking</button></div>
       </form>
-    </section>
+    </div>
   `;
 }
-
 function renderCheckoutPage() {
   return `
-    <section class="page-block">
-      <div class="section-head">
-        <h2>Checkout</h2>
-        <p class="muted">Create direct checkout or load a booking.</p>
-      </div>
-
-      <div class="card compact-form">
-        <div class="action-row wrap">
-          <label class="grow">
-            <span>Open booking or checkout</span>
+    <div class="grid">
+      <div class="panel">
+        <div class="spread"><div><h2 style="margin:0">Checkout</h2><div class="muted small">Create direct checkout or load a booking.</div></div></div>
+        <hr class="sep" />
+        <div class="twocol">
+          <div class="card">
+            <label>Open booking or checkout</label>
             <select id="checkoutRentalSelect"><option value="">Choose…</option></select>
-          </label>
-          <button id="newDirectCheckoutBtn" class="secondary" type="button">Create direct checkout</button>
+          </div>
+          <div class="card">
+            <button id="newDirectCheckoutBtn" class="ghost">Create direct checkout</button>
+          </div>
         </div>
       </div>
-
-      <div id="checkoutEditor" class="page-block"></div>
-    </section>
+      <div id="checkoutWorkspace"></div>
+    </div>
   `;
 }
-
 function renderCheckedOutPage() {
   return `
-    <section class="page-block">
-      <div class="section-head"><h2>Checked-out</h2><p class="muted">Open an active checkout to edit it.</p></div>
-      <div id="checkedOutList" class="stack-list"><div class="muted">Loading…</div></div>
-    </section>
+    <div class="panel">
+      <div class="spread"><div><h2 style="margin:0">Checked-out</h2><div class="muted small">Open an active checkout to edit it.</div></div></div>
+      <hr class="sep" />
+      <div class="list" id="checkedOutList"></div>
+    </div>
   `;
 }
-
 function renderCheckinPage() {
   return `
-    <section class="page-block">
-      <div class="section-head">
-        <h2>Check-in</h2>
-        <p class="muted">Pick returned items into the Returned list.</p>
-      </div>
-      <div class="card compact-form">
-        <label>
-          <span>Choose active checkout</span>
-          <select id="checkinRentalSelect"><option value="">Choose…</option></select>
-        </label>
-      </div>
-      <div id="checkinEditor" class="page-block"></div>
-
-      <div class="page-block">
-        <div class="section-head"><h3>History</h3><p class="muted">Completed and partially returned check-ins.</p></div>
-        <div id="checkinHistoryList" class="stack-list"><div class="muted">Loading…</div></div>
-      </div>
-    </section>
+    <div class="panel">
+      <div class="spread"><div><h2 style="margin:0">Check-in</h2><div class="muted small">Pick returned items into the Returned list.</div></div></div>
+      <hr class="sep" />
+      <label>Choose active checkout</label>
+      <select id="checkinRentalSelect"><option value="">Choose…</option></select>
+      <div id="checkinWorkspace" style="margin-top:16px"></div>
+    </div>
   `;
 }
-
 function renderEquipmentPage() {
   return `
-    <section class="page-block">
-      <div class="section-head">
-        <h2>Equipment</h2>
-        <p class="muted">Grouped list with total and available counts.</p>
-      </div>
-
-      <div class="card compact-form">
-        <div class="form-grid">
-          <label><span>Name</span><input id="eqName" type="text" /></label>
-          <label><span>Type</span><input id="eqType" type="text" /></label>
-          <label><span>Amount</span><input id="eqAmount" type="number" min="1" value="1" /></label>
-          <label><span>Manufacturer</span><input id="eqManufacturer" type="text" /></label>
-          <label><span>Model</span><input id="eqModel" type="text" /></label>
-          <label class="span-2"><span>Notes</span><input id="eqNotes" type="text" /></label>
+    <div class="grid">
+      <div class="panel">
+        <div class="spread"><div><h2 style="margin:0">Equipment</h2><div class="muted small">Grouped list with total and available counts.</div></div></div>
+        <hr class="sep" />
+        <div class="forms">
+          <div><label>Name</label><input id="eqName" /></div>
+          <div><label>Type</label><input id="eqType" /></div>
+          <div><label>Amount</label><input id="eqAmount" type="number" min="1" value="1" /></div>
+          <div><label>Manufacturer</label><input id="eqManufacturer" /></div>
+          <div><label>Model</label><input id="eqModel" /></div>
+          <div><label>Notes</label><input id="eqNotes" /></div>
         </div>
-        <div class="action-row wrap">
-          <button id="addEquipmentBtn" class="primary" type="button">Add equipment</button>
-          <input id="xmlFile" type="file" accept=".xml,text/xml,application/xml" />
-          <button id="importXmlBtn" class="secondary" type="button">Import XML</button>
+        <div class="row" style="margin-top:12px">
+          <button id="addEquipmentBtn">Add equipment</button>
+          <input type="file" id="xmlFile" accept=".xml,text/xml" />
+          <button class="ghost" id="importXmlBtn">Import XML</button>
         </div>
       </div>
-
-      <div class="card">
-        <div class="list-card-head">
-          <h3>Inventory</h3>
-          <input id="equipmentSearch" type="search" placeholder="Search equipment by name or type" />
-        </div>
-        <div class="table-wrap">
-          <table class="inventory-table">
-            <thead>
-              <tr><th>Name</th><th>Type</th><th>Total</th><th>Available</th><th></th></tr>
-            </thead>
-            <tbody id="equipmentGroupTable"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
-          </table>
-        </div>
+      <div class="panel">
+        <table class="table-like">
+          <thead><tr><th>Name</th><th>Type</th><th>Total</th><th>Available</th><th></th></tr></thead>
+          <tbody id="equipmentGroupTable"></tbody>
+        </table>
       </div>
-
-      <div id="equipmentModalHost"></div>
-    </section>
+    </div>
+    <div id="equipmentModalHost"></div>
   `;
 }
 
 function mountPageLogic(path) {
-  if (path === '/booking') setupBookingPage();
-  else if (path === '/checkout') setupCheckoutPage();
-  else if (path === '/checked-out') setupCheckedOutPage();
-  else if (path === '/checkin') setupCheckinPage();
-  else if (path === '/equipment') setupEquipmentPage();
-  else setupOverviewPage();
+  if (path === '/booking') return setupBookingPage();
+  if (path === '/checkout') return setupCheckoutPage();
+  if (path === '/checked-out') return setupCheckedOutPage();
+  if (path === '/checkin') return setupCheckinPage();
+  if (path === '/equipment') return setupEquipmentPage();
+  return setupOverviewPage();
 }
 
-async function getUserEquipment() {
-  const q = query(equipmentRef, where('ownerId', '==', uid()));
-  const snap = await getDocs(q);
-  return sortByName(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+async function getAllEquipment() {
+  const snap = await getDocs(query(equipmentRef, where('ownerId', '==', uid())));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() })).map((item) => ({
+    ...item,
+    name: item.name || 'Unnamed equipment',
+    type: item.type || item.category || 'General',
+    unitNumber: Number(item.unitNumber) || 1,
+    displayName: item.displayName || unitDisplayName(item.name || 'Unnamed equipment', Number(item.unitNumber) || 1),
+    groupKey: item.groupKey || `${slugify(item.type || item.category || 'General')}__${slugify(item.name || 'Unnamed equipment')}`,
+    status: item.status || 'available',
+  })).sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
-async function getUserRentals() {
-  const q = query(rentalsRef, where('ownerId', '==', uid()));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+async function getEquipmentGroups() {
+  const items = await getAllEquipment();
+  const groups = new Map();
+  for (const item of items) {
+    if (!groups.has(item.groupKey)) groups.set(item.groupKey, { key: item.groupKey, name: item.name, type: item.type, manufacturer: item.manufacturer || '', model: item.model || '', notes: item.notes || '', items: [] });
+    groups.get(item.groupKey).items.push(item);
+  }
+  return [...groups.values()].map((g) => ({ ...g, items: g.items.sort((a,b)=>a.unitNumber-b.unitNumber), total: g.items.length, available: g.items.filter((i)=>i.status !== 'checked_out').length })).sort((a,b)=>a.name.localeCompare(b.name));
+}
+async function getRentals() {
+  const snap = await getDocs(query(rentalsRef, where('ownerId', '==', uid())));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a,b) => (dateOnly(a.pickupDate) || '').localeCompare(dateOnly(b.pickupDate) || ''));
 }
 async function getRentalById(id) {
   if (!id) return null;
-  const ref = doc(db, 'rentals', id);
-  const snap = await getDoc(ref);
+  const snap = await getDoc(doc(db, 'rentals', id));
   if (!snap.exists()) return null;
   const data = { id: snap.id, ...snap.data() };
-  if (data.ownerId !== uid()) throw new Error('Permission denied.');
-  return data;
+  return data.ownerId === uid() ? data : null;
 }
-async function getEquipmentGroups() {
-  const items = await getUserEquipment();
-  const groups = new Map();
-  for (const item of items) {
-    const key = item.groupKey || groupKeyFor(item.name, item.type);
-    const existing = groups.get(key) || {
-      key,
-      name: item.name || item.displayName || 'Unnamed',
-      type: item.type || 'General',
-      manufacturer: item.manufacturer || '',
-      model: item.model || '',
-      notes: item.notes || '',
-      total: 0,
-      available: 0,
-      items: [],
-    };
-    existing.total += 1;
-    if ((item.status || 'available') === 'available') existing.available += 1;
-    existing.items.push(item);
-    groups.set(key, existing);
+async function createRental(payload) {
+  return addDoc(rentalsRef, { ...payload, ownerId: uid(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+}
+async function updateRental(rentalId, payload) {
+  await updateDoc(doc(db, 'rentals', rentalId), { ...payload, updatedAt: serverTimestamp() });
+  if (payload.items) await syncEquipmentStatuses(payload.items, payload.status);
+}
+async function deleteRentalById(rentalId) {
+  const rental = await getRentalById(rentalId);
+  if (rental?.items?.length) {
+    const batch = writeBatch(db);
+    for (const item of rental.items) {
+      if (item.equipmentId && (rental.status === 'checked_out' || rental.status === 'partial_return')) {
+        batch.update(doc(db, 'equipment', item.equipmentId), { status: 'available', updatedAt: serverTimestamp() });
+      }
+    }
+    await batch.commit();
   }
-  return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name));
+  await deleteDoc(doc(db, 'rentals', rentalId));
 }
-
-async function createEquipmentGroup(data) {
-  const name = String(data.name || '').trim();
-  const type = String(data.type || 'General').trim() || 'General';
-  const amount = Math.max(1, Number(data.amount || 1));
-  if (!name) throw new Error('Equipment name is required.');
-  const existing = await getUserEquipment();
-  const sameGroup = existing.filter((item) => (item.groupKey || groupKeyFor(item.name, item.type)) === groupKeyFor(name, type));
-  let nextNumber = sameGroup.reduce((max, item) => Math.max(max, Number(item.unitNumber || 0)), 0) + 1;
+async function syncEquipmentStatuses(items, rentalStatus) {
+  const batch = writeBatch(db);
+  for (const item of items || []) {
+    if (!item.equipmentId) continue;
+    let nextStatus = 'available';
+    if (rentalStatus === 'checked_out') nextStatus = item.pickedUp ? 'checked_out' : 'available';
+    if (rentalStatus === 'partial_return' || rentalStatus === 'completed') nextStatus = item.returned ? 'available' : 'checked_out';
+    if (rentalStatus === 'booked') nextStatus = 'available';
+    batch.update(doc(db, 'equipment', item.equipmentId), { status: nextStatus, updatedAt: serverTimestamp() });
+  }
+  await batch.commit();
+}
+async function createEquipmentGroup(payload) {
+  const name = payload.name.trim();
+  const type = (payload.type || 'General').trim();
+  const amount = Math.max(1, Number(payload.amount) || 1);
+  const groupKey = `${slugify(type)}__${slugify(name)}`;
+  const existing = (await getAllEquipment()).filter((x) => x.groupKey === groupKey);
+  let highest = existing.reduce((m, x) => Math.max(m, Number(x.unitNumber) || 0), 0);
   const batch = writeBatch(db);
   for (let i = 0; i < amount; i += 1) {
-    const ref = doc(collection(db, 'equipment'));
-    batch.set(ref, {
+    highest += 1;
+    batch.set(doc(equipmentRef), {
       ownerId: uid(),
       name,
       type,
-      displayName: unitDisplayName(name, nextNumber),
-      unitNumber: nextNumber,
-      manufacturer: String(data.manufacturer || '').trim(),
-      model: String(data.model || '').trim(),
-      notes: String(data.notes || '').trim(),
-      groupKey: groupKeyFor(name, type),
+      category: type,
+      unitNumber: highest,
+      displayName: unitDisplayName(name, highest),
+      groupKey,
+      manufacturer: payload.manufacturer?.trim() || '',
+      model: payload.model?.trim() || '',
+      notes: payload.notes?.trim() || '',
       status: 'available',
+      active: true,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-    nextNumber += 1;
   }
   await batch.commit();
 }
 async function deleteEquipmentItem(id) {
-  const ref = doc(db, 'equipment', id);
-  await deleteDoc(ref);
+  await deleteDoc(doc(db, 'equipment', id));
 }
-async function updateEquipmentStatuses(itemIds, status) {
+function parseEquipmentXml(text) {
+  const parser = new DOMParser();
+  const xml = parser.parseFromString(text, 'text/xml');
+  if (xml.querySelector('parsererror')) throw new Error('The XML file could not be read.');
+  const nodes = [...xml.querySelectorAll('item, equipment, product, asset, entry, record')];
+  const source = nodes.length ? nodes : [...xml.documentElement.children];
+  const readField = (node, names) => {
+    for (const name of names) {
+      const child = [...node.children].find((x) => x.tagName.toLowerCase() === name.toLowerCase());
+      if (child?.textContent?.trim()) return child.textContent.trim();
+      const attr = node.getAttribute(name);
+      if (attr?.trim()) return attr.trim();
+    }
+    return '';
+  };
+  const rows = source.map((node) => ({
+    name: readField(node, ['name','title','label','equipmentname','description']),
+    type: readField(node, ['type','category','group','department','equipmenttype']),
+    amount: Math.max(1, parseInt(readField(node, ['amount','qty','quantity','count','units']) || '1', 10) || 1),
+    manufacturer: readField(node, ['manufacturer','brand','make']),
+    model: readField(node, ['model']),
+    notes: readField(node, ['notes','comment','comments']),
+  })).filter((r) => r.name);
+  if (!rows.length) throw new Error('No equipment entries were found in the XML file.');
+  return rows;
+}
+async function importEquipmentRows(rows) {
+  const existing = await getAllEquipment();
+  const highestByGroup = new Map();
+  existing.forEach((item) => highestByGroup.set(item.groupKey, Math.max(highestByGroup.get(item.groupKey) || 0, item.unitNumber)));
   const batch = writeBatch(db);
-  itemIds.filter(Boolean).forEach((id) => {
-    batch.update(doc(db, 'equipment', id), { status, updatedAt: serverTimestamp() });
-  });
+  for (const row of rows) {
+    const name = row.name.trim();
+    const type = (row.type || 'General').trim();
+    const groupKey = `${slugify(type)}__${slugify(name)}`;
+    let nextUnit = highestByGroup.get(groupKey) || 0;
+    const amount = Math.max(1, Number(row.amount) || 1);
+    for (let i = 0; i < amount; i += 1) {
+      nextUnit += 1;
+      batch.set(doc(equipmentRef), {
+        ownerId: uid(), name, type, category: type, unitNumber: nextUnit,
+        displayName: unitDisplayName(name, nextUnit), groupKey,
+        manufacturer: row.manufacturer?.trim() || '', model: row.model?.trim() || '', notes: row.notes?.trim() || '',
+        status: 'available', active: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      });
+    }
+    highestByGroup.set(groupKey, nextUnit);
+  }
   await batch.commit();
 }
-async function createRental(payload) {
-  await addDoc(rentalsRef, { ...payload, ownerId: uid(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
-}
-async function updateRental(id, payload) {
-  await updateDoc(doc(db, 'rentals', id), { ...payload, updatedAt: serverTimestamp() });
-}
-async function deleteRental(id) {
-  await deleteDoc(doc(db, 'rentals', id));
-}
 
-function bookingSummaryCard(rental, kind) {
-  const items = readArray(rental.items);
-  const hidden = Math.max(0, items.length - 3);
-  const deleteBtn = `<button class="ghost danger" type="button" data-delete-rental="${rental.id}">Delete</button>`;
-  const actionBtn = kind === 'booked'
-    ? `<a class="secondary small-btn" href="#/checkout?id=${encodeURIComponent(rental.id)}">Open</a>`
-    : `<a class="secondary small-btn" href="#/checked-out?id=${encodeURIComponent(rental.id)}">Open</a>`;
+function bookingCard(rental, actionLabel, actionPath, extraButtons = '') {
   return `
-    <div class="card stack-item">
-      <div class="item-topline">
+    <div class="card">
+      <div class="spread">
         <div>
-          <strong>${esc(rental.renterName || rental.company || 'Untitled')}</strong>
-          <div class="muted small">Out ${esc(fmtDate(rental.pickupDate))} • In ${esc(fmtDate(rental.returnDate))}</div>
+          <div class="badge ${escapeHtml(rental.status)}">${escapeHtml(rental.status)}</div>
+          <h3 style="margin:8px 0 6px">${escapeHtml(rental.renterName || 'Unnamed renter')}</h3>
+          <div class="item-meta"><span>Out ${escapeHtml(fmtDate(rental.pickupDate))}</span><span>In ${escapeHtml(fmtDate(rental.returnDate))}</span></div>
         </div>
-        <div class="action-row">${actionBtn}${deleteBtn}</div>
+        <div class="toolbar">
+          <button class="small ghost" data-nav="${escapeHtml(actionPath)}">${escapeHtml(actionLabel)}</button>
+          ${extraButtons}
+        </div>
       </div>
-      <div class="muted small">${items.slice(0, 3).map((i) => esc(i.name || i.displayName || '')).join(', ')}${hidden ? ` +${hidden} more` : ''}</div>
+      <div style="margin-top:10px"><button class="small ghost" data-toggle-items="${rental.id}">View items (${(rental.items || []).length})</button></div>
+      <div class="stack-list hidden" id="items-${rental.id}" style="margin-top:10px">${(rental.items || []).map((item) => `<div class="item-row vertical"><div><strong>${escapeHtml(item.name || item.equipmentName || 'Item')}</strong></div></div>`).join('') || '<div class="muted small">No items.</div>'}</div>
     </div>
   `;
 }
 
 async function setupOverviewPage() {
   try {
-    const rentals = await getUserRentals();
-    const active = rentals.filter((r) => ['booked', 'checked_out', 'partial_return'].includes(r.status));
-    const pickupsToday = rentals.filter((r) => ['booked', 'checked_out'].includes(r.status) && dateOnly(r.pickupDate) === todayLocal()).length;
-    const returnsToday = rentals.filter((r) => ['checked_out', 'partial_return'].includes(r.status) && dateOnly(r.returnDate) === todayLocal()).length;
-    const overdue = rentals.filter((r) => ['checked_out', 'partial_return'].includes(r.status) && dateOnly(r.returnDate) < todayLocal()).length;
-    ['stat0', 'stat1', 'stat2', 'stat3'].forEach((id, idx) => {
-      const el = document.getElementById(id);
-      if (el) el.textContent = [active.length, pickupsToday, returnsToday, overdue][idx];
-    });
-
-    const bookingsEl = document.getElementById('overviewBookings');
-    const checkedOutEl = document.getElementById('overviewCheckedOut');
-    if (bookingsEl) {
-      const booked = rentals
-        .filter((r) => r.status === 'booked')
-        .sort((a, b) => dateOnly(a.pickupDate).localeCompare(dateOnly(b.pickupDate)));
-      bookingsEl.innerHTML = booked.length ? booked.map((r) => bookingSummaryCard(r, 'booked')).join('') : '<div class="muted">No upcoming bookings.</div>';
-    }
-    if (checkedOutEl) {
-      const checked = rentals
-        .filter((r) => ['checked_out', 'partial_return'].includes(r.status))
-        .sort((a, b) => dateOnly(a.returnDate).localeCompare(dateOnly(b.returnDate)));
-      checkedOutEl.innerHTML = checked.length ? checked.map((r) => bookingSummaryCard(r, 'checked_out')).join('') : '<div class="muted">Nothing checked out.</div>';
-    }
-    bindDeleteRentalButtons();
+    const rentals = await getRentals();
+    const active = rentals.filter((r) => ['booked','checked_out','partial_return'].includes(r.status));
+    const today = todayLocal();
+    const pickupsToday = rentals.filter((r) => ['booked','checked_out','partial_return'].includes(r.status) && dateOnly(r.pickupDate) === today).length;
+    const returnsToday = rentals.filter((r) => ['checked_out','partial_return'].includes(r.status) && dateOnly(r.returnDate) === today).length;
+    const overdue = rentals.filter((r) => ['checked_out','partial_return'].includes(r.status) && dateOnly(r.returnDate) && dateOnly(r.returnDate) < today).length;
+    document.getElementById('statActive').textContent = String(active.length);
+    document.getElementById('statPickupsToday').textContent = String(pickupsToday);
+    document.getElementById('statReturnsToday').textContent = String(returnsToday);
+    document.getElementById('statOverdue').textContent = String(overdue);
+    document.getElementById('overviewBooked').innerHTML = rentals.filter((r) => r.status === 'booked').map((r) => bookingCard(r, 'Checkout', `/checkout?id=${r.id}`, ``)).join('') || '<div class="card muted">No upcoming bookings.</div>';
+    document.getElementById('overviewOut').innerHTML = rentals.filter((r) => ['checked_out','partial_return'].includes(r.status)).map((r) => bookingCard(r, 'Open', `/checked-out?id=${r.id}`, ``)).join('') || '<div class="card muted">Nothing checked out.</div>';
+    attachSharedCardHandlers();
   } catch (e) {
-    setFlash({ error: e.message || 'Failed to load overview.' });
-    render();
+    setFlash({ error: e.message || 'Failed to load overview.' }); render();
   }
 }
 
-async function setupEquipmentPage() {
-  const tbody = document.getElementById('equipmentGroupTable');
-  const searchInput = document.getElementById('equipmentSearch');
-  const modalHost = document.getElementById('equipmentModalHost');
-  if (!tbody) return;
-  let groups = [];
-
-  const renderGroups = () => {
-    const q = (searchInput?.value || '').trim().toLowerCase();
-    const filtered = !q
-      ? groups
-      : groups.filter((group) => [group.name, group.type, group.manufacturer, group.model].filter(Boolean).some((v) => String(v).toLowerCase().includes(q)));
-    tbody.innerHTML = filtered.length ? filtered.map((group) => `
-      <tr>
-        <td>${esc(group.name)}</td>
-        <td>${esc(group.type)}</td>
-        <td>${group.total}</td>
-        <td>${group.available}</td>
-        <td><button class="secondary small-btn" type="button" data-open-group="${esc(group.key)}">Open</button></td>
-      </tr>
-    `).join('') : '<tr><td colspan="5" class="muted">No equipment matches your search.</td></tr>';
-    document.querySelectorAll('[data-open-group]').forEach((btn) => {
-      btn.onclick = () => openEquipmentModal(groups.find((g) => g.key === btn.dataset.openGroup));
-    });
-  };
-
-  const load = async () => {
-    groups = await getEquipmentGroups();
-    renderGroups();
-  };
-
-  const openEquipmentModal = (group) => {
-    if (!group || !modalHost) return;
-    modalHost.innerHTML = `
-      <div class="modal-backdrop">
-        <div class="modal-card equipment-modal">
-          <div class="modal-head">
-            <div>
-              <h3>${esc(group.name)}</h3>
-              <p class="muted">${esc(group.type)} • ${group.total} total • ${group.available} available</p>
-            </div>
-            <button id="closeEquipmentModal" class="ghost small-btn" type="button">Back</button>
-          </div>
-          <div class="list-scroll tall-scroll">
-            ${sortByName(group.items).map((item) => `
-              <div class="item-row">
-                <div>
-                  <strong>${esc(item.displayName)}</strong>
-                  <div class="muted small">${esc(item.status || 'available')}</div>
-                </div>
-                <button class="ghost danger small-btn" type="button" data-delete-item="${item.id}">Remove</button>
-              </div>
-            `).join('')}
-          </div>
-          <div class="sticky-actions">
-            <button id="addOneToGroupBtn" class="primary" type="button">Add 1 more</button>
-          </div>
-        </div>
-      </div>
-    `;
-    document.getElementById('closeEquipmentModal')?.addEventListener('click', () => { modalHost.innerHTML = ''; });
-    document.getElementById('addOneToGroupBtn')?.addEventListener('click', async () => {
-      try {
-        await createEquipmentGroup({ name: group.name, type: group.type, amount: 1, manufacturer: group.manufacturer, model: group.model, notes: group.notes });
-        await load();
-        modalHost.innerHTML = '';
-      } catch (e) {
-        setFlash({ error: e.message || 'Failed to add equipment.' });
+function attachSharedCardHandlers() {
+  document.querySelectorAll('[data-nav]').forEach((btn) => btn.onclick = () => setRoute(btn.dataset.nav));
+  document.querySelectorAll('[data-toggle-items]').forEach((btn) => btn.onclick = () => document.getElementById(`items-${btn.dataset.toggleItems}`)?.classList.toggle('hidden'));
+  document.querySelectorAll('[data-delete-rental]').forEach((btn) => btn.onclick = async () => {
+    const id = btn.dataset.deleteRental;
+    if (!id) return;
+    try {
+      const rental = await getRentalById(id);
+      if (!rental || rental.status !== 'booked') {
+        setFlash({ error: 'Only bookings can be deleted.' });
         render();
+        return;
       }
-    });
-    document.querySelectorAll('[data-delete-item]').forEach((btn) => {
-      btn.onclick = async () => {
-        if (!confirm('Remove this equipment item?')) return;
-        try {
-          await deleteEquipmentItem(btn.dataset.deleteItem);
-          await load();
-          modalHost.innerHTML = '';
-        } catch (e) {
-          setFlash({ error: e.message || 'Failed to remove equipment item.' });
-          render();
-        }
-      };
-    });
-  };
-
-  document.getElementById('addEquipmentBtn')?.addEventListener('click', async () => {
-    try {
-      await createEquipmentGroup({
-        name: document.getElementById('eqName')?.value || '',
-        type: document.getElementById('eqType')?.value || '',
-        amount: document.getElementById('eqAmount')?.value || '1',
-        manufacturer: document.getElementById('eqManufacturer')?.value || '',
-        model: document.getElementById('eqModel')?.value || '',
-        notes: document.getElementById('eqNotes')?.value || '',
-      });
-      setFlash({ notice: 'Equipment added.' });
+      if (!confirm('Delete this booking?')) return;
+      await deleteRentalById(id);
+      setFlash({ notice: 'Booking deleted.' });
       render();
     } catch (e) {
-      setFlash({ error: e.message || 'Failed to add equipment.' });
+      setFlash({ error: e.message || 'Delete failed.' });
       render();
     }
   });
-  document.getElementById('importXmlBtn')?.addEventListener('click', async () => {
-    const file = document.getElementById('xmlFile')?.files?.[0];
-    if (!file) {
-      setFlash({ error: 'Choose an XML file first.' });
-      return render();
-    }
-    try {
-      const text = await file.text();
-      const rows = parseEquipmentXml(text);
-      for (const row of rows) {
-        await createEquipmentGroup(row);
-      }
-      setFlash({ notice: `Imported ${rows.length} rows.` });
-      render();
-    } catch (e) {
-      setFlash({ error: e.message || 'XML import failed.' });
-      render();
-    }
-  });
-  searchInput?.addEventListener('input', renderGroups);
-
-  try {
-    await load();
-  } catch (e) {
-    setFlash({ error: e.message || 'Failed to load equipment.' });
-    render();
-  }
-}
-
-function parseEquipmentXml(xmlText) {
-  const parser = new DOMParser();
-  const docXml = parser.parseFromString(xmlText, 'application/xml');
-  if (docXml.querySelector('parsererror')) throw new Error('Invalid XML file.');
-  let entries = Array.from(docXml.querySelectorAll('item,equipment,product,asset,entry,record'));
-  if (!entries.length && docXml.documentElement) {
-    entries = Array.from(docXml.documentElement.children);
-  }
-  const getValue = (node, names) => {
-    for (const name of names) {
-      if (node.getAttribute?.(name)) return node.getAttribute(name);
-      const child = node.querySelector?.(name);
-      if (child?.textContent?.trim()) return child.textContent.trim();
-    }
-    return '';
-  };
-  return entries.map((node) => ({
-    name: getValue(node, ['name', 'title', 'label', 'equipmentname', 'description']),
-    type: getValue(node, ['type', 'category', 'group', 'department', 'equipmenttype']) || 'General',
-    amount: Number(getValue(node, ['amount', 'qty', 'quantity', 'count', 'units']) || 1),
-    manufacturer: getValue(node, ['manufacturer', 'brand', 'make']),
-    model: getValue(node, ['model']),
-    notes: getValue(node, ['notes', 'comment', 'comments']),
-  })).filter((row) => row.name);
-}
-
-function rentalOptionLabel(rental) {
-  return `${rental.renterName || rental.company || 'Untitled'} — Out ${fmtDate(rental.pickupDate)} • In ${fmtDate(rental.returnDate)} (${rental.status})`;
-}
-
-function normalizeItems(items) {
-  return readArray(items).map((item) => ({
-    equipmentId: item.equipmentId || null,
-    name: item.name || item.displayName || item.equipmentName || '',
-    type: item.type || 'General',
-    pickedUp: !!item.pickedUp,
-    returned: !!item.returned,
-  }));
-}
-
-async function getUnavailableEquipmentIds(start, end, excludeRentalId = '') {
-  if (!start || !end) return new Set();
-  const rentals = await getUserRentals();
-  const blocking = rentals.filter((r) => r.id !== excludeRentalId && ['booked', 'checked_out', 'partial_return'].includes(r.status) && overlaps(start, end, r.pickupDate, r.returnDate));
-  const ids = new Set();
-  blocking.forEach((r) => {
-    normalizeItems(r.items).forEach((item) => {
-      if (item.equipmentId && !item.returned) ids.add(item.equipmentId);
-    });
-  });
-  return ids;
 }
 
 async function setupBookingPage() {
-  const bookingForm = document.getElementById('bookingForm');
-  const availableEl = document.getElementById('bookingAvailableList');
+  const resultsEl = document.getElementById('bookingSearchResults');
   const selectedEl = document.getElementById('bookingSelectedList');
-  const searchInput = document.getElementById('bookingSearch');
-  const pickupInput = document.getElementById('pickupDate');
-  const returnInput = document.getElementById('returnDate');
-  const noteEl = document.getElementById('bookingAvailabilityNote');
-  if (!bookingForm || !availableEl || !selectedEl || !searchInput || !pickupInput || !returnInput || !noteEl) return;
-
-  let allEquipment = [];
-  let unavailableIds = new Set();
+  const searchEl = document.getElementById('bookingSearch');
+  const pickupEl = document.getElementById('pickupDate');
+  const returnEl = document.getElementById('returnDate');
+  const availabilityNote = document.getElementById('availabilityNote');
+  let catalog = [];
+  let rentals = [];
   const selected = [];
 
-  const renderSelected = () => {
-    selectedEl.innerHTML = selected.length ? selected.map((item, index) => `
+  function selectedIds() { return new Set(selected.filter((x) => x.equipmentId).map((x) => x.equipmentId)); }
+  function unavailableIds() { return getUnavailableForDates(rentals, pickupEl.value, returnEl.value); }
+  function renderSelected() {
+    selectedEl.innerHTML = selected.length ? selected.map((item, idx) => `
       <div class="item-row">
-        <div><strong>${esc(item.name)}</strong><div class="muted small">${esc(item.type || '')}</div></div>
-        <button class="ghost small-btn" type="button" data-remove-index="${index}">Remove</button>
-      </div>
-    `).join('') : '<div class="muted">No equipment selected.</div>';
-    selectedEl.querySelectorAll('[data-remove-index]').forEach((btn) => {
-      btn.onclick = () => {
-        selected.splice(Number(btn.dataset.removeIndex), 1);
-        renderSelected();
-        renderAvailable();
-      };
-    });
-  };
-
-  const renderAvailable = () => {
-    const q = searchInput.value.trim().toLowerCase();
-    const selectedIds = new Set(selected.map((item) => item.equipmentId).filter(Boolean));
-    const filtered = allEquipment.filter((item) => {
-      if ((item.status || 'available') !== 'available') return false;
-      if (selectedIds.has(item.id)) return false;
-      if (unavailableIds.has(item.id)) return false;
-      if (!q) return true;
-      return [item.displayName, item.name, item.type, item.manufacturer, item.model].filter(Boolean).some((v) => String(v).toLowerCase().includes(q));
-    });
-    availableEl.innerHTML = filtered.length ? filtered.map((item) => `
-      <div class="item-row">
-        <div><strong>${esc(item.displayName)}</strong><div class="muted small">${esc(item.type || 'General')}</div></div>
-        <button class="secondary small-btn" type="button" data-add-id="${item.id}">Add</button>
-      </div>
-    `).join('') : '<div class="muted">No equipment matches your search or selected dates.</div>';
-    availableEl.querySelectorAll('[data-add-id]').forEach((btn) => {
-      btn.onclick = () => {
-        const item = allEquipment.find((row) => row.id === btn.dataset.addId);
-        if (!item) return;
-        selected.push({ equipmentId: item.id, name: item.displayName, type: item.type || 'General', pickedUp: false, returned: false });
-        renderSelected();
-        renderAvailable();
-      };
-    });
-  };
-
-  async function refreshAvailability() {
-    const start = pickupInput.value;
-    const end = returnInput.value;
-    if (!start || !end) {
-      unavailableIds = new Set();
-      noteEl.textContent = 'Choose dates to check availability.';
-      renderAvailable();
-      return;
-    }
-    unavailableIds = await getUnavailableEquipmentIds(start, end);
-    noteEl.textContent = unavailableIds.size ? `${unavailableIds.size} item(s) are already booked or checked out for these dates.` : 'All available items can be booked for these dates.';
-    renderAvailable();
+        <div><strong>${escapeHtml(item.name)}</strong><div class="item-meta"><span>${escapeHtml(item.type || '')}</span></div></div>
+        <button class="small ghost" data-remove-selected="${idx}">Remove</button>
+      </div>`).join('') : '<div class="muted small">No equipment added yet.</div>';
+    document.querySelectorAll('[data-remove-selected]').forEach((btn) => btn.onclick = () => { selected.splice(Number(btn.dataset.removeSelected), 1); renderSelected(); renderResults(); });
   }
-
+  function renderResults() {
+    const q = searchEl.value.trim().toLowerCase();
+    const blocked = unavailableIds();
+    const picked = selectedIds();
+    let items = catalog.filter((item) => item.status !== 'checked_out' && !picked.has(item.id) && !blocked.has(item.id));
+    if (q) items = items.filter((item) => [item.displayName, item.name, item.type].filter(Boolean).some((v) => v.toLowerCase().includes(q)));
+    availabilityNote.textContent = pickupEl.value && returnEl.value ? `${items.length} items available for selected dates.` : 'Choose dates to check availability.';
+    resultsEl.innerHTML = items.length ? items.map((item) => `
+      <div class="item-row">
+        <div><strong>${escapeHtml(item.displayName)}</strong><div class="item-meta"><span>${escapeHtml(item.type)}</span><span>${escapeHtml(item.manufacturer || '')}</span><span>${escapeHtml(item.model || '')}</span></div></div>
+        <button class="small" data-add-item="${item.id}">Add</button>
+      </div>`).join('') : '<div class="muted small">No equipment matches your search.</div>';
+    document.querySelectorAll('[data-add-item]').forEach((btn) => btn.onclick = () => {
+      const item = catalog.find((x) => x.id === btn.dataset.addItem);
+      if (!item) return;
+      selected.push({ equipmentId: item.id, equipmentName: item.name, name: item.displayName, type: item.type, unitNumber: item.unitNumber, pickedUp: false, returned: false });
+      renderSelected(); renderResults();
+    });
+  }
   try {
-    allEquipment = await getUserEquipment();
-    await refreshAvailability();
-    renderSelected();
-  } catch (e) {
-    setFlash({ error: e.message || 'Failed to load booking page.' });
-    render();
-    return;
-  }
-
-  searchInput.addEventListener('input', renderAvailable);
-  pickupInput.addEventListener('change', refreshAvailability);
-  returnInput.addEventListener('change', refreshAvailability);
-
-  bookingForm.onsubmit = async (event) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    if (!selected.length) {
-      setFlash({ error: 'Add at least one equipment item.' });
-      return render();
-    }
-    try {
-      await createRental({
-        renterName: form.get('renterName'),
-        company: form.get('company'),
-        email: form.get('email'),
-        phone: form.get('phone'),
-        pickupDate: form.get('pickupDate'),
-        returnDate: form.get('returnDate'),
-        notes: form.get('notes'),
-        status: 'booked',
-        items: selected,
-      });
-      setFlash({ notice: 'Booking created.' });
-      setRoute('/');
-    } catch (e) {
-      setFlash({ error: e.message || 'Failed to save booking.' });
-      render();
-    }
-  };
+    [catalog, rentals] = await Promise.all([getAllEquipment(), getRentals()]);
+    renderSelected(); renderResults();
+    searchEl.oninput = renderResults;
+    pickupEl.oninput = renderResults;
+    returnEl.oninput = renderResults;
+    document.getElementById('bookingForm').onsubmit = async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      if (!selected.length) { setFlash({ error: 'Add at least one equipment item.' }); return render(); }
+      try {
+        await createRental({
+          renterName: form.get('renterName'), company: form.get('company'), email: form.get('email'), phone: form.get('phone'),
+          pickupDate: form.get('pickupDate'), returnDate: form.get('returnDate'), notes: form.get('notes'),
+          status: 'booked', items: selected,
+        });
+        setFlash({ notice: 'Booking created.' }); setRoute('/');
+      } catch (e) { setFlash({ error: e.message || 'Failed to save booking.' }); render(); }
+    };
+  } catch (e) { setFlash({ error: e.message || 'Failed to load booking page.' }); render(); }
 }
 
-function renderCheckoutEditor(rental, allEquipment) {
-  const items = normalizeItems(rental?.items);
-  const todo = items.filter((item) => !item.pickedUp);
-  const picked = items.filter((item) => item.pickedUp);
-  const searchOptions = allEquipment.filter((item) => (item.status || 'available') === 'available' && !items.some((row) => row.equipmentId === item.id));
+function getUnavailableForDates(rentals, pickupDate, returnDate, excludeRentalId = '') {
+  if (!pickupDate || !returnDate) return new Set();
+  const blocked = new Set();
+  rentals
+    .filter((r) => r.id !== excludeRentalId)
+    .filter((r) => ['booked','checked_out','partial_return'].includes(r.status))
+    .filter((r) => overlaps(r.pickupDate, r.returnDate, pickupDate, returnDate))
+    .forEach((r) => {
+      (r.items || []).forEach((item) => {
+        if (!item?.equipmentId) return;
+        if (r.status === 'checked_out') {
+          if (item.pickedUp && !item.returned) blocked.add(item.equipmentId);
+          return;
+        }
+        if (r.status === 'partial_return') {
+          if (!item.returned) blocked.add(item.equipmentId);
+          return;
+        }
+        blocked.add(item.equipmentId);
+      });
+    });
+  return blocked;
+}
+
+function checkoutEditorMarkup(rental, catalog, pickedList) {
+  const allItems = rental.items || [];
+  const requested = allItems.filter((item) => !pickedList.some((x) => x.equipmentId === item.equipmentId || (!x.equipmentId && x.name === item.name)));
   return `
-    <div class="card compact-form">
-      <div class="form-grid">
-        <label><span>Name</span><input id="checkoutName" value="${esc(rental?.renterName || '')}" /></label>
-        <label><span>Company</span><input id="checkoutCompany" value="${esc(rental?.company || '')}" /></label>
-        <label><span>Out</span><input id="checkoutOut" type="date" value="${esc(dateOnly(rental?.pickupDate) || todayLocal())}" /></label>
-        <label><span>In</span><input id="checkoutIn" type="date" value="${esc(dateOnly(rental?.returnDate) || todayLocal())}" /></label>
-      </div>
-    </div>
-
-    <div class="two-column-layout">
-      <section class="card list-card">
-        <div class="list-card-head"><h3>To pick</h3><div class="small muted">${todo.length} left</div></div>
-        <div id="checkoutTodoList" class="list-scroll">
-          ${todo.length ? todo.map((item, index) => `
-            <div class="item-row">
-              <div><strong>${esc(item.name)}</strong><div class="muted small">${esc(item.type || '')}</div></div>
-              <button class="secondary small-btn" type="button" data-pick-index="${items.findIndex((row) => row === item)}">Pick</button>
-            </div>`).join('') : '<div class="muted">Nothing left to pick.</div>'}
+    <div class="panel">
+      <div class="spread">
+        <div>
+          <h2 style="margin:0">${escapeHtml(rental.renterName || 'Direct checkout')}</h2>
+          <div class="item-meta"><span>Out ${escapeHtml(fmtDate(rental.pickupDate))}</span><span>In ${escapeHtml(fmtDate(rental.returnDate))}</span></div>
         </div>
-      </section>
 
-      <section class="card list-card">
-        <div class="list-card-head"><h3>Picked</h3><div class="small muted">${picked.length} picked</div></div>
-        <div id="checkoutPickedList" class="list-scroll">
-          ${picked.length ? picked.map((item) => `
-            <div class="item-row">
-              <div><strong>${esc(item.name)}</strong><div class="muted small">${esc(item.type || '')}</div></div>
-              <button class="ghost small-btn" type="button" data-unpick-index="${items.findIndex((row) => row === item)}">Move back</button>
-            </div>`).join('') : '<div class="muted">No picked items yet.</div>'}
-        </div>
-      </section>
-    </div>
-
-    <div class="card list-card">
-      <div class="list-card-head"><h3>Add equipment</h3><input id="checkoutAddSearch" type="search" placeholder="Search available equipment" /></div>
-      <div id="checkoutAddList" class="list-scroll short-scroll">
-        ${searchOptions.length ? searchOptions.slice(0, 80).map((item) => `
-          <div class="item-row">
-            <div><strong>${esc(item.displayName)}</strong><div class="muted small">${esc(item.type || '')}</div></div>
-            <button class="secondary small-btn" type="button" data-add-equipment="${item.id}">Add</button>
-          </div>`).join('') : '<div class="muted">No more available equipment to add.</div>'}
       </div>
+      <hr class="sep" />
+      <div class="twocol">
+        <div class="stack-box">
+          <div class="spread"><strong>Booking list</strong><span class="muted small">What is left to find.</span></div>
+          <div class="stack-list" id="checkoutRequestedList" style="margin-top:10px">${requested.length ? requested.map((item, idx) => `
+            <div class="item-row vertical">
+              <div class="spread"><div><strong>${escapeHtml(item.name)}</strong><div class="item-meta"><span>${escapeHtml(item.type || '')}</span></div></div><div class="toolbar"><button class="small success" data-pick-requested="${idx}">Pick</button><button class="small ghost" data-remove-requested="${idx}">Remove</button></div></div>
+            </div>`).join('') : '<div class="muted small">Nothing left to pick.</div>'}</div>
+        </div>
+        <div class="stack-box">
+          <div class="spread"><strong>Picked</strong><span class="muted small">Items ready to go.</span></div>
+          <div class="stack-list" id="checkoutPickedList" style="margin-top:10px">${pickedList.length ? pickedList.map((item, idx) => `
+            <div class="item-row vertical">
+              <div class="spread"><div><strong>${escapeHtml(item.name)}</strong><div class="item-meta"><span>${escapeHtml(item.type || '')}</span></div></div><button class="small ghost" data-unpick-item="${idx}">Move back</button></div>
+            </div>`).join('') : '<div class="muted small">No picked items yet.</div>'}</div>
+        </div>
+      </div>
+      <hr class="sep" />
+      <div class="card">
+        <div class="spread"><strong>Add more equipment</strong></div>
+        <input id="checkoutSearch" placeholder="Search available equipment" style="margin:10px 0" />
+        <div class="search-results" id="checkoutSearchResults"></div>
+      </div>
+      <div class="row" style="margin-top:14px"><button id="saveCheckoutBtn">Save checkout</button></div>
     </div>
-
-    <div class="sticky-actions">
-      <button id="saveCheckoutBtn" class="primary" type="button">Save checkout</button>
-      ${rental?.id ? `<button id="deleteCheckoutBtn" class="ghost danger" type="button">Delete</button>` : ''}
-    </div>
-
-    <script type="application/json" id="checkoutItemsData">${safeJson(items)}</script>
   `;
 }
 
 async function setupCheckoutPage() {
-  const selectEl = document.getElementById('checkoutRentalSelect');
-  const editorEl = document.getElementById('checkoutEditor');
-  if (!selectEl || !editorEl) return;
-  let rentals = [];
-  let allEquipment = [];
-  let currentRental = null;
+  const params = getRouteParams();
+  const selectedId = params.get('id') || '';
+  const rentals = await getRentals();
+  const activeOptions = rentals.filter((r) => ['booked','checked_out'].includes(r.status));
+  const select = document.getElementById('checkoutRentalSelect');
+  select.innerHTML = '<option value="">Choose…</option>' + activeOptions.map((r) => `<option value="${r.id}" ${r.id === selectedId ? 'selected' : ''}>${escapeHtml(r.renterName || 'Unnamed')} · ${escapeHtml(r.status)} · ${escapeHtml(fmtDate(r.pickupDate))}</option>`).join('');
+  select.onchange = () => setRoute('/checkout', select.value ? { id: select.value } : null);
+  document.getElementById('newDirectCheckoutBtn').onclick = () => setRoute('/checkout', { direct: '1' });
+  if (selectedId) return mountCheckoutEditor(await getRentalById(selectedId));
+  if (params.get('direct') === '1') {
+    const now = new Date().toISOString().slice(0,10);
+    return mountCheckoutEditor({ id: '', renterName: 'Direct checkout', pickupDate: now, returnDate: now, status: 'checked_out', items: [] }, true);
+  }
+  document.getElementById('checkoutWorkspace').innerHTML = '<div class="card muted">Choose a booking or create a direct checkout.</div>';
+}
 
-  try {
-    rentals = (await getUserRentals()).filter((r) => ['booked', 'checked_out', 'partial_return'].includes(r.status));
-    allEquipment = await getUserEquipment();
-  } catch (e) {
-    setFlash({ error: e.message || 'Failed to load checkout page.' });
-    render();
+async function mountCheckoutEditor(rental, isDirect = false) {
+  if (!rental) {
+    document.getElementById('checkoutWorkspace').innerHTML = '<div class="card muted">Booking not found.</div>';
     return;
   }
-
-  const params = getRouteParams();
-  const requestedId = params.get('id') || '';
-  selectEl.innerHTML = `<option value="">Choose…</option>${rentals.map((r) => `<option value="${r.id}" ${r.id === requestedId ? 'selected' : ''}>${esc(rentalOptionLabel(r))}</option>`).join('')}`;
-
-  async function openRental(rental) {
-    currentRental = rental ? { ...rental, items: normalizeItems(rental.items) } : {
-      renterName: '',
-      company: '',
-      pickupDate: todayLocal(),
-      returnDate: todayLocal(),
-      status: 'checked_out',
-      items: [],
-    };
-    editorEl.innerHTML = renderCheckoutEditor(currentRental, allEquipment);
-    bindCheckoutEditor();
-  }
-
-  function bindCheckoutEditor() {
-    const items = JSON.parse(document.getElementById('checkoutItemsData')?.textContent || '[]');
-
-    function rerenderWithItems(updatedItems) {
-      currentRental.items = updatedItems;
-      editorEl.innerHTML = renderCheckoutEditor(currentRental, allEquipment);
-      bindCheckoutEditor();
-    }
-
-    document.querySelectorAll('[data-pick-index]').forEach((btn) => {
-      btn.onclick = () => {
-        const updated = [...items];
-        updated[Number(btn.dataset.pickIndex)].pickedUp = true;
-        rerenderWithItems(updated);
-      };
-    });
-
-    document.querySelectorAll('[data-unpick-index]').forEach((btn) => {
-      btn.onclick = () => {
-        const updated = [...items];
-        updated[Number(btn.dataset.unpickIndex)].pickedUp = false;
-        rerenderWithItems(updated);
-      };
-    });
-
-    const addSearch = document.getElementById('checkoutAddSearch');
-    const addList = document.getElementById('checkoutAddList');
-    const renderAddList = () => {
-      if (!addList) return;
-      const q = (addSearch?.value || '').trim().toLowerCase();
-      const currentIds = new Set(items.map((item) => item.equipmentId).filter(Boolean));
-      const options = allEquipment.filter((item) => (item.status || 'available') === 'available' && !currentIds.has(item.id) && (!q || [item.displayName, item.name, item.type].filter(Boolean).some((v) => String(v).toLowerCase().includes(q))));
-      addList.innerHTML = options.length ? options.slice(0, 80).map((item) => `
-        <div class="item-row">
-          <div><strong>${esc(item.displayName)}</strong><div class="muted small">${esc(item.type || '')}</div></div>
-          <button class="secondary small-btn" type="button" data-add-equipment="${item.id}">Add</button>
-        </div>`).join('') : '<div class="muted">No more available equipment to add.</div>';
-      addList.querySelectorAll('[data-add-equipment]').forEach((btn) => {
-        btn.onclick = () => {
-          const eq = allEquipment.find((row) => row.id === btn.dataset.addEquipment);
-          if (!eq) return;
-          rerenderWithItems([...items, { equipmentId: eq.id, name: eq.displayName, type: eq.type || 'General', pickedUp: true, returned: false }]);
-        };
+  const workspace = document.getElementById('checkoutWorkspace');
+  const catalog = await getAllEquipment();
+  const pickedList = (rental.items || []).filter((item) => item.pickedUp && !item.returned).map((x) => ({ ...x }));
+  function rerender() {
+    workspace.innerHTML = checkoutEditorMarkup(rental, catalog, pickedList);
+    const allItems = rental.items || [];
+    const selectedIds = new Set(allItems.filter((x) => x.equipmentId).map((x) => x.equipmentId));
+    const available = catalog.filter((item) => item.status !== 'checked_out' && !selectedIds.has(item.id));
+    const resultsEl = document.getElementById('checkoutSearchResults');
+    const searchEl = document.getElementById('checkoutSearch');
+    function renderSearch() {
+      const q = searchEl.value.trim().toLowerCase();
+      const rows = available.filter((item) => !q || [item.displayName, item.name, item.type].filter(Boolean).some((v) => v.toLowerCase().includes(q)));
+      resultsEl.innerHTML = rows.length ? rows.map((item) => `<div class="item-row"><div><strong>${escapeHtml(item.displayName)}</strong><div class="item-meta"><span>${escapeHtml(item.type)}</span></div></div><button class="small" data-add-checkout-item="${item.id}">Add</button></div>`).join('') : '<div class="muted small">No available equipment matches your search.</div>';
+      document.querySelectorAll('[data-add-checkout-item]').forEach((btn) => btn.onclick = () => {
+        const item = catalog.find((x) => x.id === btn.dataset.addCheckoutItem);
+        if (!item) return;
+        rental.items.push({ equipmentId: item.id, equipmentName: item.name, name: item.displayName, type: item.type, unitNumber: item.unitNumber, pickedUp: false, returned: false });
+        rerender();
       });
-    };
-    addSearch?.addEventListener('input', renderAddList);
-    renderAddList();
+    }
+    searchEl.oninput = renderSearch;
+    renderSearch();
 
-    document.getElementById('saveCheckoutBtn')?.addEventListener('click', async () => {
-      const payload = {
-        renterName: document.getElementById('checkoutName')?.value || '',
-        company: document.getElementById('checkoutCompany')?.value || '',
-        pickupDate: document.getElementById('checkoutOut')?.value || todayLocal(),
-        returnDate: document.getElementById('checkoutIn')?.value || todayLocal(),
-        status: items.some((item) => !item.pickedUp) ? 'booked' : 'checked_out',
-        items,
-      };
+    const requested = allItems.filter((item) => !pickedList.some((x) => x.equipmentId === item.equipmentId || (!x.equipmentId && x.name === item.name)));
+    document.querySelectorAll('[data-pick-requested]').forEach((btn) => btn.onclick = () => {
+      const item = requested[Number(btn.dataset.pickRequested)];
+      const original = rental.items.find((x) => (x.equipmentId && x.equipmentId === item.equipmentId) || (!x.equipmentId && x.name === item.name && !x.pickedUp));
+      if (!original) return;
+      original.pickedUp = true;
+      pickedList.push(original);
+      rerender();
+    });
+    document.querySelectorAll('[data-remove-requested]').forEach((btn) => btn.onclick = () => {
+      const item = requested[Number(btn.dataset.removeRequested)];
+      rental.items = rental.items.filter((x) => !((x.equipmentId && x.equipmentId === item.equipmentId) || (!x.equipmentId && x.name === item.name && !x.pickedUp)));
+      rerender();
+    });
+    document.querySelectorAll('[data-unpick-item]').forEach((btn) => btn.onclick = () => {
+      const item = pickedList[Number(btn.dataset.unpickItem)];
+      const original = rental.items.find((x) => (x.equipmentId && x.equipmentId === item.equipmentId) || (!x.equipmentId && x.name === item.name));
+      if (original) original.pickedUp = false;
+      pickedList.splice(Number(btn.dataset.unpickItem), 1);
+      rerender();
+    });
+    document.getElementById('saveCheckoutBtn').onclick = async () => {
+      const items = rental.items.map((x) => ({ ...x, pickedUp: !!x.pickedUp, returned: !!x.returned }));
+      const status = items.some((x) => x.pickedUp) ? 'checked_out' : 'booked';
       try {
-        if (currentRental.id) {
-          const before = normalizeItems((await getRentalById(currentRental.id))?.items);
-          const addedCheckedOut = items.filter((i) => i.pickedUp && i.equipmentId && !before.some((b) => b.equipmentId === i.equipmentId && b.pickedUp));
-          const released = before.filter((b) => b.equipmentId && b.pickedUp && !items.some((i) => i.equipmentId === b.equipmentId && i.pickedUp));
-          if (addedCheckedOut.length) await updateEquipmentStatuses(addedCheckedOut.map((i) => i.equipmentId), 'checked_out');
-          if (released.length) await updateEquipmentStatuses(released.map((i) => i.equipmentId), 'available');
-          await updateRental(currentRental.id, payload);
+        if (isDirect && !rental.id) {
+          const ref = await createRental({ renterName: rental.renterName || 'Direct checkout', company: '', email: '', phone: '', pickupDate: rental.pickupDate, returnDate: rental.returnDate, notes: '', items, status });
+          await updateRental(ref.id, { items, status, renterName: rental.renterName || 'Direct checkout', pickupDate: rental.pickupDate, returnDate: rental.returnDate, company: '', email: '', phone: '', notes: '' });
         } else {
-          await createRental(payload);
-          const checkedOutIds = items.filter((item) => item.pickedUp && item.equipmentId).map((item) => item.equipmentId);
-          if (checkedOutIds.length) await updateEquipmentStatuses(checkedOutIds, 'checked_out');
+          await updateRental(rental.id, { ...rental, items, status });
         }
         setFlash({ notice: 'Checkout saved.' });
         setRoute('/checked-out');
-      } catch (e) {
-        setFlash({ error: e.message || 'Failed to save checkout.' });
-        render();
-      }
-    });
-
-    document.getElementById('deleteCheckoutBtn')?.addEventListener('click', async () => {
-      if (!currentRental?.id || !confirm('Delete this checkout?')) return;
-      try {
-        const checkedOutIds = items.filter((item) => item.equipmentId && item.pickedUp).map((item) => item.equipmentId);
-        if (checkedOutIds.length) await updateEquipmentStatuses(checkedOutIds, 'available');
-        await deleteRental(currentRental.id);
-        setFlash({ notice: 'Checkout deleted.' });
-        setRoute('/');
-      } catch (e) {
-        setFlash({ error: e.message || 'Failed to delete checkout.' });
-        render();
-      }
-    });
+      } catch (e) { setFlash({ error: e.message || 'Failed to save checkout.' }); render(); }
+    };
   }
-
-  selectEl.addEventListener('change', async () => {
-    const id = selectEl.value;
-    if (!id) {
-      editorEl.innerHTML = '';
-      return;
-    }
-    const rental = rentals.find((r) => r.id === id);
-    await openRental(rental);
-  });
-
-  document.getElementById('newDirectCheckoutBtn')?.addEventListener('click', async () => {
-    selectEl.value = '';
-    await openRental(null);
-  });
-
-  if (requestedId) {
-    const rental = rentals.find((r) => r.id === requestedId);
-    if (rental) await openRental(rental);
-  }
+  rerender();
 }
 
 async function setupCheckedOutPage() {
-  const listEl = document.getElementById('checkedOutList');
-  if (!listEl) return;
-  try {
-    const rentals = (await getUserRentals()).filter((r) => ['checked_out', 'partial_return'].includes(r.status)).sort((a, b) => dateOnly(a.returnDate).localeCompare(dateOnly(b.returnDate)));
-    listEl.innerHTML = rentals.length ? rentals.map((r) => `
-      <div class="card stack-item">
-        <div class="item-topline">
-          <div>
-            <strong>${esc(r.renterName || r.company || 'Untitled')}</strong>
-            <div class="muted small">Out ${esc(fmtDate(r.pickupDate))} • In ${esc(fmtDate(r.returnDate))}</div>
-          </div>
-          <div class="action-row">
-            <a class="secondary small-btn" href="#/checkout?id=${encodeURIComponent(r.id)}">Edit</a>
-            <button class="ghost danger small-btn" type="button" data-delete-rental="${r.id}">Delete</button>
-          </div>
-        </div>
-      </div>
-    `).join('') : '<div class="muted">No active checkouts.</div>';
-    bindDeleteRentalButtons();
-  } catch (e) {
-    setFlash({ error: e.message || 'Failed to load checked-out page.' });
-    render();
-  }
+  const rentals = await getRentals();
+  const list = rentals.filter((r) => ['checked_out','partial_return'].includes(r.status));
+  const container = document.getElementById('checkedOutList');
+  container.innerHTML = list.length ? list.map((r) => bookingCard(r, 'Open', `/checkout?id=${r.id}`, ``)).join('') : '<div class="card muted">No active checkouts.</div>';
+  attachSharedCardHandlers();
 }
 
-function renderCheckinEditor(rental) {
-  const items = normalizeItems(rental.items);
-  const stillOut = items.filter((item) => item.pickedUp && !item.returned);
-  const returned = items.filter((item) => item.returned);
+function checkinEditorMarkup(rental, outItems, returnedItems) {
   return `
-    <div class="card compact-form">
-      <div class="item-topline">
-        <div>
-          <strong>${esc(rental.renterName || rental.company || 'Untitled')}</strong>
-          <div class="muted small">Out ${esc(fmtDate(rental.pickupDate))} • In ${esc(fmtDate(rental.returnDate))}</div>
-        </div>
-        <button class="ghost danger small-btn" id="deleteCheckinRentalBtn" type="button">Delete</button>
+    <div class="twocol">
+      <div class="stack-box">
+        <div class="spread"><strong>Still out</strong><span class="muted small">Items not yet returned.</span></div>
+        <div class="stack-list" style="margin-top:10px">${outItems.length ? outItems.map((item, idx) => `<div class="item-row vertical"><div class="spread"><div><strong>${escapeHtml(item.name)}</strong></div><button class="small success" data-return-pick="${idx}">Pick</button></div></div>`).join('') : '<div class="muted small">Nothing left out.</div>'}</div>
+      </div>
+      <div class="stack-box">
+        <div class="spread"><strong>Returned</strong><span class="muted small">Picked into check-in.</span></div>
+        <div class="stack-list" style="margin-top:10px">${returnedItems.length ? returnedItems.map((item, idx) => `<div class="item-row vertical"><div class="spread"><div><strong>${escapeHtml(item.name)}</strong></div><button class="small ghost" data-return-unpick="${idx}">Move back</button></div></div>`).join('') : '<div class="muted small">No returned items yet.</div>'}</div>
       </div>
     </div>
-
-    <div class="two-column-layout">
-      <section class="card list-card">
-        <div class="list-card-head"><h3>Still out</h3><div class="small muted">${stillOut.length} left</div></div>
-        <div class="list-scroll">
-          ${stillOut.length ? stillOut.map((item) => `
-            <div class="item-row">
-              <div><strong>${esc(item.name)}</strong><div class="muted small">${esc(item.type || '')}</div></div>
-              <button class="secondary small-btn" type="button" data-return-index="${items.findIndex((row) => row === item)}">Pick</button>
-            </div>`).join('') : '<div class="muted">Nothing left out.</div>'}
-        </div>
-      </section>
-
-      <section class="card list-card">
-        <div class="list-card-head"><h3>Returned</h3><div class="small muted">${returned.length} returned</div></div>
-        <div class="list-scroll">
-          ${returned.length ? returned.map((item) => `
-            <div class="item-row">
-              <div><strong>${esc(item.name)}</strong><div class="muted small">${esc(item.type || '')}</div></div>
-              <button class="ghost small-btn" type="button" data-unreturn-index="${items.findIndex((row) => row === item)}">Move back</button>
-            </div>`).join('') : '<div class="muted">No returned items yet.</div>'}
-        </div>
-      </section>
-    </div>
-
-    <div class="sticky-actions">
-      <button id="saveCheckinBtn" class="primary" type="button">Save check-in</button>
-    </div>
-
-    <script type="application/json" id="checkinItemsData">${safeJson(items)}</script>
+    <div class="row" style="margin-top:16px"><button id="saveCheckinBtn">Save check-in</button></div>
   `;
 }
 
 async function setupCheckinPage() {
-  const selectEl = document.getElementById('checkinRentalSelect');
-  const editorEl = document.getElementById('checkinEditor');
-  const historyEl = document.getElementById('checkinHistoryList');
-  if (!selectEl || !editorEl || !historyEl) return;
-
-  let rentals = [];
-  try {
-    rentals = await getUserRentals();
-  } catch (e) {
-    setFlash({ error: e.message || 'Failed to load check-ins.' });
-    render();
-    return;
+  const rentals = await getRentals();
+  const list = rentals.filter((r) => ['checked_out','partial_return'].includes(r.status));
+  const select = document.getElementById('checkinRentalSelect');
+  select.innerHTML = '<option value="">Choose…</option>' + list.map((r) => `<option value="${r.id}">${escapeHtml(r.renterName || 'Unnamed')} · ${escapeHtml(fmtDate(r.pickupDate))}</option>`).join('');
+  const params = getRouteParams();
+  if (params.get('id')) select.value = params.get('id');
+  select.onchange = () => setRoute('/checkin', select.value ? { id: select.value } : null);
+  if (!select.value) return;
+  const rental = await getRentalById(select.value);
+  const workspace = document.getElementById('checkinWorkspace');
+  if (!rental) return void(workspace.innerHTML = '<div class="card muted">Checkout not found.</div>');
+  const returned = (rental.items || []).filter((item) => item.returned).map((x) => ({ ...x }));
+  function rerender() {
+    const out = (rental.items || []).filter((item) => item.pickedUp && !item.returned);
+    workspace.innerHTML = checkinEditorMarkup(rental, out, returned);
+    document.querySelectorAll('[data-return-pick]').forEach((btn) => btn.onclick = () => {
+      const item = out[Number(btn.dataset.returnPick)];
+      const original = rental.items.find((x) => x.equipmentId === item.equipmentId || (!x.equipmentId && x.name === item.name && x.pickedUp && !x.returned));
+      if (!original) return;
+      original.returned = true;
+      returned.push(original);
+      rerender();
+    });
+    document.querySelectorAll('[data-return-unpick]').forEach((btn) => btn.onclick = () => {
+      const item = returned[Number(btn.dataset.returnUnpick)];
+      const original = rental.items.find((x) => x.equipmentId === item.equipmentId || (!x.equipmentId && x.name === item.name && x.returned));
+      if (original) original.returned = false;
+      returned.splice(Number(btn.dataset.returnUnpick), 1);
+      rerender();
+    });
+    document.getElementById('saveCheckinBtn').onclick = async () => {
+      const items = rental.items.map((x) => ({ ...x }));
+      const remaining = items.filter((x) => x.pickedUp && !x.returned).length;
+      const status = remaining ? 'partial_return' : 'completed';
+      try { await updateRental(rental.id, { ...rental, items, status }); setFlash({ notice: 'Check-in saved.' }); setRoute('/'); } catch (e) { setFlash({ error: e.message || 'Failed to save check-in.' }); render(); }
+    };
   }
+  rerender();
+}
 
-  const active = rentals.filter((r) => ['checked_out', 'partial_return'].includes(r.status));
-  const history = rentals.filter((r) => ['completed', 'partial_return'].includes(r.status)).sort((a, b) => dateOnly(b.returnDate).localeCompare(dateOnly(a.returnDate)));
-  selectEl.innerHTML = `<option value="">Choose…</option>${active.map((r) => `<option value="${r.id}">${esc(rentalOptionLabel(r))}</option>`).join('')}`;
-  historyEl.innerHTML = history.length ? history.map((r) => `
-    <div class="card stack-item">
-      <div class="item-topline">
-        <div>
-          <strong>${esc(r.renterName || r.company || 'Untitled')}</strong>
-          <div class="muted small">Out ${esc(fmtDate(r.pickupDate))} • In ${esc(fmtDate(r.returnDate))} • ${esc(r.status)}</div>
-        </div>
-        <a class="secondary small-btn" href="#/checkin?id=${encodeURIComponent(r.id)}">Open</a>
+async function setupEquipmentPage() {
+  async function load() {
+    const groups = await getEquipmentGroups();
+    const tbody = document.getElementById('equipmentGroupTable');
+    tbody.innerHTML = groups.length ? groups.map((group) => `
+      <tr>
+        <td><strong>${escapeHtml(group.name)}</strong></td>
+        <td>${escapeHtml(group.type)}</td>
+        <td>${group.total}</td>
+        <td>${group.available}</td>
+        <td><button class="small ghost" data-open-group="${escapeHtml(group.key)}">Open</button></td>
+      </tr>`).join('') : '<tr><td colspan="5" class="muted">No equipment yet.</td></tr>';
+    document.querySelectorAll('[data-open-group]').forEach((btn) => btn.onclick = () => openEquipmentModal(groups.find((g) => g.key === btn.dataset.openGroup)));
+  }
+  document.getElementById('addEquipmentBtn').onclick = async () => {
+    try {
+      await createEquipmentGroup({
+        name: document.getElementById('eqName').value,
+        type: document.getElementById('eqType').value,
+        amount: document.getElementById('eqAmount').value,
+        manufacturer: document.getElementById('eqManufacturer').value,
+        model: document.getElementById('eqModel').value,
+        notes: document.getElementById('eqNotes').value,
+      });
+      setFlash({ notice: 'Equipment added.' }); render();
+    } catch (e) { setFlash({ error: e.message || 'Failed to add equipment.' }); render(); }
+  };
+  document.getElementById('importXmlBtn').onclick = async () => {
+    const file = document.getElementById('xmlFile').files?.[0];
+    if (!file) { setFlash({ error: 'Choose an XML file first.' }); return render(); }
+    try {
+      const text = await file.text();
+      const rows = parseEquipmentXml(text);
+      await importEquipmentRows(rows);
+      setFlash({ notice: `Imported ${rows.length} rows.` }); render();
+    } catch (e) { setFlash({ error: e.message || 'XML import failed.' }); render(); }
+  };
+  await load();
+}
+
+function openEquipmentModal(group) {
+  const host = document.getElementById('equipmentModalHost');
+  if (!group) return;
+  host.innerHTML = `
+    <div class="modal-backdrop" id="equipmentModalBackdrop">
+      <div class="modal">
+        <div class="spread"><div><h2 style="margin:0">${escapeHtml(group.name)}</h2><div class="muted small">${escapeHtml(group.type)} · ${group.total} total · ${group.available} available</div></div><button class="small ghost" id="closeEquipmentModalBtn">Back</button></div>
+        <hr class="sep" />
+        <div class="row" style="margin-bottom:12px"><input id="modalAddAmount" type="number" min="1" value="1" style="max-width:120px" /><button id="modalAddBtn">Add more</button></div>
+        <div class="stack-list">${group.items.map((item) => `<div class="item-row"><div><strong>${escapeHtml(item.displayName)}</strong><div class="item-meta"><span>${escapeHtml(item.status)}</span></div></div><button class="small danger" data-delete-equipment="${item.id}">Remove</button></div>`).join('')}</div>
       </div>
     </div>
-  `).join('') : '<div class="muted">No check-in history yet.</div>';
-
-  const params = getRouteParams();
-  const requestedId = params.get('id') || '';
-
-  async function openRental(rental) {
-    if (!rental) {
-      editorEl.innerHTML = '';
-      return;
-    }
-    editorEl.innerHTML = renderCheckinEditor(rental);
-    bindCheckinEditor(rental);
-  }
-
-  function bindCheckinEditor(rental) {
-    const items = JSON.parse(document.getElementById('checkinItemsData')?.textContent || '[]');
-
-    function rerender(updatedItems) {
-      const updatedRental = { ...rental, items: updatedItems };
-      editorEl.innerHTML = renderCheckinEditor(updatedRental);
-      bindCheckinEditor(updatedRental);
-    }
-
-    document.querySelectorAll('[data-return-index]').forEach((btn) => {
-      btn.onclick = () => {
-        const updated = [...items];
-        updated[Number(btn.dataset.returnIndex)].returned = true;
-        rerender(updated);
-      };
-    });
-    document.querySelectorAll('[data-unreturn-index]').forEach((btn) => {
-      btn.onclick = () => {
-        const updated = [...items];
-        updated[Number(btn.dataset.unreturnIndex)].returned = false;
-        rerender(updated);
-      };
-    });
-
-    document.getElementById('saveCheckinBtn')?.addEventListener('click', async () => {
-      const updatedItems = JSON.parse(document.getElementById('checkinItemsData')?.textContent || '[]');
-      const allReturned = updatedItems.filter((i) => i.pickedUp).every((i) => i.returned);
-      const returnedIds = updatedItems.filter((i) => i.equipmentId && i.returned).map((i) => i.equipmentId);
-      try {
-        if (returnedIds.length) await updateEquipmentStatuses(returnedIds, 'available');
-        await updateRental(rental.id, {
-          items: updatedItems,
-          status: allReturned ? 'completed' : 'partial_return',
-        });
-        setFlash({ notice: 'Check-in saved.' });
-        setRoute('/checkin');
-      } catch (e) {
-        setFlash({ error: e.message || 'Failed to save check-in.' });
-        render();
-      }
-    });
-
-    document.getElementById('deleteCheckinRentalBtn')?.addEventListener('click', async () => {
-      if (!confirm('Delete this booking/check-out?')) return;
-      try {
-        const checkedIds = items.filter((i) => i.equipmentId && i.pickedUp && !i.returned).map((i) => i.equipmentId);
-        if (checkedIds.length) await updateEquipmentStatuses(checkedIds, 'available');
-        await deleteRental(rental.id);
-        setFlash({ notice: 'Deleted.' });
-        setRoute('/checkin');
-      } catch (e) {
-        setFlash({ error: e.message || 'Failed to delete.' });
-        render();
-      }
-    });
-  }
-
-  selectEl.addEventListener('change', () => {
-    const rental = active.find((r) => r.id === selectEl.value);
-    openRental(rental);
-  });
-
-  if (requestedId) {
-    const requested = rentals.find((r) => r.id === requestedId);
-    if (requested) {
-      selectEl.value = active.some((r) => r.id === requested.id) ? requested.id : '';
-      await openRental(requested);
-    }
-  }
+  `;
+  document.getElementById('closeEquipmentModalBtn').onclick = () => host.innerHTML = '';
+  document.getElementById('equipmentModalBackdrop').onclick = (e) => { if (e.target.id === 'equipmentModalBackdrop') host.innerHTML = ''; };
+  document.getElementById('modalAddBtn').onclick = async () => {
+    await createEquipmentGroup({ name: group.name, type: group.type, amount: document.getElementById('modalAddAmount').value, manufacturer: group.manufacturer, model: group.model, notes: group.notes });
+    setFlash({ notice: 'Equipment added.' }); render();
+  };
+  document.querySelectorAll('[data-delete-equipment]').forEach((btn) => btn.onclick = async () => { if (!confirm('Remove this item?')) return; await deleteEquipmentItem(btn.dataset.deleteEquipment); setFlash({ notice: 'Item removed.' }); render(); });
 }
-
-function bindDeleteRentalButtons() {
-  document.querySelectorAll('[data-delete-rental]').forEach((btn) => {
-    btn.onclick = async () => {
-      if (!confirm('Delete this booking/check-out?')) return;
-      try {
-        const rental = await getRentalById(btn.dataset.deleteRental);
-        const idsToRelease = normalizeItems(rental.items).filter((i) => i.equipmentId && i.pickedUp && !i.returned).map((i) => i.equipmentId);
-        if (idsToRelease.length) await updateEquipmentStatuses(idsToRelease, 'available');
-        await deleteRental(rental.id);
-        setFlash({ notice: 'Deleted.' });
-        render();
-      } catch (e) {
-        setFlash({ error: e.message || 'Failed to delete.' });
-        render();
-      }
-    };
-  });
-}
-
-window.addEventListener('hashchange', () => {
-  state.route = getRoute();
-  render();
-});
 
 onAuthStateChanged(auth, (user) => {
   state.user = user;
   state.route = getRoute();
   render();
 });
+window.addEventListener('hashchange', () => { state.route = getRoute(); render(); });
