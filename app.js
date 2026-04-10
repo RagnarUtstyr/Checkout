@@ -128,7 +128,7 @@ function appShell(content) {
     <div class="topbar">
       <div class="brand">
         <h1>Equipment Tracker</h1>
-        <p>Private to the signed-in user</p>
+        <p>The free equipment tracker</p>
       </div>
       <div class="userbar">
         <span>${escapeHtml(state.user?.displayName || state.user?.email || '')}</span>
