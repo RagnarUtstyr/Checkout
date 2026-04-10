@@ -528,7 +528,7 @@ async function deleteRental(id) {
 function bookingSummaryCard(rental, kind) {
   const items = readArray(rental.items);
   const hidden = Math.max(0, items.length - 3);
-  const deleteBtn = `<button class="ghost danger" type="button" data-delete-rental="${rental.id}">Delete</button>`;
+  const deleteBtn = ``;
   const actionBtn = kind === 'booked'
     ? `<a class="secondary small-btn" href="#/checkout?id=${encodeURIComponent(rental.id)}">Open</a>`
     : `<a class="secondary small-btn" href="#/checked-out?id=${encodeURIComponent(rental.id)}">Open</a>`;
@@ -929,7 +929,7 @@ function renderCheckoutEditor(rental, allEquipment) {
 
     <div class="sticky-actions">
       <button id="saveCheckoutBtn" class="primary" type="button">Save checkout</button>
-      ${rental?.id ? `<button id="deleteCheckoutBtn" class="ghost danger" type="button">Delete</button>` : ''}
+      ${rental?.id && rental.status === 'booked' ? `<button id="deleteCheckoutBtn" class="ghost danger" type="button">Delete booking</button>` : ''}
     </div>
 
     <script type="application/json" id="checkoutItemsData">${safeJson(items)}</script>
@@ -1049,15 +1049,13 @@ async function setupCheckoutPage() {
     });
 
     document.getElementById('deleteCheckoutBtn')?.addEventListener('click', async () => {
-      if (!currentRental?.id || !confirm('Delete this checkout?')) return;
+      if (!currentRental?.id || currentRental.status !== 'booked' || !confirm('Delete this booking?')) return;
       try {
-        const checkedOutIds = items.filter((item) => item.equipmentId && item.pickedUp).map((item) => item.equipmentId);
-        if (checkedOutIds.length) await updateEquipmentStatuses(checkedOutIds, 'available');
         await deleteRental(currentRental.id);
-        setFlash({ notice: 'Checkout deleted.' });
+        setFlash({ notice: 'Booking deleted.' });
         setRoute('/');
       } catch (e) {
-        setFlash({ error: e.message || 'Failed to delete checkout.' });
+        setFlash({ error: e.message || 'Failed to delete booking.' });
         render();
       }
     });
@@ -1098,7 +1096,6 @@ async function setupCheckedOutPage() {
           </div>
           <div class="action-row">
             <a class="secondary small-btn" href="#/checkout?id=${encodeURIComponent(r.id)}">Edit</a>
-            <button class="ghost danger small-btn" type="button" data-delete-rental="${r.id}">Delete</button>
           </div>
         </div>
       </div>
@@ -1121,7 +1118,6 @@ function renderCheckinEditor(rental) {
           <strong>${esc(rental.renterName || rental.company || 'Untitled')}</strong>
           <div class="muted small">Out ${esc(fmtDate(rental.pickupDate))} • In ${esc(fmtDate(rental.returnDate))}</div>
         </div>
-        <button class="ghost danger small-btn" id="deleteCheckinRentalBtn" type="button">Delete</button>
       </div>
     </div>
 
@@ -1241,19 +1237,6 @@ async function setupCheckinPage() {
       }
     });
 
-    document.getElementById('deleteCheckinRentalBtn')?.addEventListener('click', async () => {
-      if (!confirm('Delete this booking/check-out?')) return;
-      try {
-        const checkedIds = items.filter((i) => i.equipmentId && i.pickedUp && !i.returned).map((i) => i.equipmentId);
-        if (checkedIds.length) await updateEquipmentStatuses(checkedIds, 'available');
-        await deleteRental(rental.id);
-        setFlash({ notice: 'Deleted.' });
-        setRoute('/checkin');
-      } catch (e) {
-        setFlash({ error: e.message || 'Failed to delete.' });
-        render();
-      }
-    });
   }
 
   selectEl.addEventListener('change', () => {
@@ -1270,24 +1253,7 @@ async function setupCheckinPage() {
   }
 }
 
-function bindDeleteRentalButtons() {
-  document.querySelectorAll('[data-delete-rental]').forEach((btn) => {
-    btn.onclick = async () => {
-      if (!confirm('Delete this booking/check-out?')) return;
-      try {
-        const rental = await getRentalById(btn.dataset.deleteRental);
-        const idsToRelease = normalizeItems(rental.items).filter((i) => i.equipmentId && i.pickedUp && !i.returned).map((i) => i.equipmentId);
-        if (idsToRelease.length) await updateEquipmentStatuses(idsToRelease, 'available');
-        await deleteRental(rental.id);
-        setFlash({ notice: 'Deleted.' });
-        render();
-      } catch (e) {
-        setFlash({ error: e.message || 'Failed to delete.' });
-        render();
-      }
-    };
-  });
-}
+function bindDeleteRentalButtons() {}
 
 window.addEventListener('hashchange', () => {
   state.route = getRoute();
